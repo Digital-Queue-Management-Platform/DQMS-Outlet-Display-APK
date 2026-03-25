@@ -1,0 +1,29 @@
+# Build Artifacts
+build/
+app/build/
+intermediates/
+outputs/
+tmp/
+.gradle/
+
+# Local configuration
+local.properties
+.DS_Store
+*.iml
+.idea/
+
+# Android Studio local state
+.idea/workspace.xml
+.idea/libraries/
+.idea/modules.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/caches/
+
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Kotlin
+.kotlin/
