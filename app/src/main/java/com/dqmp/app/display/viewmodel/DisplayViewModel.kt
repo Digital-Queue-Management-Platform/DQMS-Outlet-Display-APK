@@ -13,6 +13,8 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -25,10 +27,21 @@ sealed class DisplayState {
         val counters: List<CounterStatus>,
         val branchStatus: BranchStatusResponse,
         val isStale: Boolean = false,
-        val lastSync: Long = System.currentTimeMillis()
+        val lastSync: Long = System.currentTimeMillis(),
+        val clockSkew: Long = 0L,
+        val baseUrl: String = ""
     ) : DisplayState()
     data class Error(val message: String, val lastOutletId: String? = null) : DisplayState()
 }
+
+data class TokenCallEvent(
+    val tokenNumber: String,
+    val counterNumber: Int?,
+    val customerName: String?,
+    val preferredLanguage: String? = "en",
+    val eventType: String = "CALL",
+    val customText: String? = null
+)
 
 class DisplayViewModel(private val repository: SettingsRepository) : ViewModel() {
     private val _state = MutableStateFlow<DisplayState>(DisplayState.Initial)
@@ -40,11 +53,14 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private val json = Json { ignoreUnknownKeys = true }
     private val client = OkHttpClient.Builder().build()
     
+    private var activeBaseUrl: String = SettingsRepository.DEFAULT_URL
+    
     private var lastSuccessfulData: Triple<DisplayData, List<CounterStatus>, BranchStatusResponse>? = null
     private var lastSuccessTime: Long = 0
+    private var currentSkew: Long = 0L
     
-    // For audio announcements (Token, Counter, Name)
-    private val _announcementEvent = MutableSharedFlow<Triple<String, Int?, String?>>(replay = 0)
+    // For audio announcements
+    private val _announcementEvent = MutableSharedFlow<TokenCallEvent>(replay = 0)
     val announcementEvent = _announcementEvent.asSharedFlow()
     private var lastAnnouncedTokenId: String? = null
     private var lastAnnouncedCounter: Int? = null
@@ -65,6 +81,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     }
 
     private fun initialize(outletId: String, baseUrl: String) {
+        activeBaseUrl = baseUrl
         stopAll()
         setupApi(baseUrl)
         startPolling(outletId)
@@ -109,8 +126,46 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         val incomingId = data?.get("outletId")?.jsonPrimitive?.content
                         
                         if (incomingId == null || incomingId == outletId) {
-                            if (type in listOf("TOKEN_CALLED", "TOKEN_RECALLED", "NEW_TOKEN", "RECALL", "CALL")) {
+                            if (type in listOf("TOKEN_CALLED", "TOKEN_RECALLED", "RECALL", "CALL", "TEST_SOUND")) {
                                 Log.d("DQMP_WS", "Update event received: $type. Fetching...")
+                                
+                                // Proactive Announcement from WS (Calls and Recalls)
+                                if (type == "TOKEN_CALLED" || type == "TOKEN_RECALLED" || type == "TEST_SOUND" || type == "RECALL") {
+                                    val tokenNum = data?.get("tokenNumber")?.jsonPrimitive?.content 
+                                        ?: data?.get("token_number")?.jsonPrimitive?.content ?: ""
+                                    val counterNum = data?.get("counterNumber")?.jsonPrimitive?.content?.toIntOrNull()
+                                        ?: data?.get("counter_number")?.jsonPrimitive?.content?.toIntOrNull()
+                                    val name = data?.get("customer")?.jsonObject?.get("name")?.jsonPrimitive?.content
+                                        ?: data?.get("customer_name")?.jsonPrimitive?.content
+                                        ?: data?.get("name")?.jsonPrimitive?.content 
+                                    
+                                    val langJson = data?.get("preferredLanguages")
+                                    val lang = when {
+                                        langJson is JsonArray && langJson.isNotEmpty() -> langJson[0].jsonPrimitive.content
+                                        langJson is JsonPrimitive -> langJson.content
+                                        else -> data?.get("preferred_language")?.jsonPrimitive?.content ?: "en"
+                                    }
+                                    
+                                    val eventType = if (type == "TEST_SOUND") "TEST" 
+                                                   else if (type.contains("RECALL") || type == "RECALL") "RECALL" 
+                                                   else "CALL"
+                                    
+                                    Log.d("DQMP_AUDIO", "Emitting $eventType event for token #$tokenNum")
+                                    
+                                    viewModelScope.launch {
+                                        _announcementEvent.emit(
+                                            TokenCallEvent(
+                                                tokenNumber = tokenNum,
+                                                counterNumber = counterNum,
+                                                customerName = name,
+                                                preferredLanguage = lang,
+                                                eventType = eventType,
+                                                customText = data?.get("text")?.jsonPrimitive?.content
+                                            )
+                                        )
+                                    }
+                                }
+                                
                                 viewModelScope.launch { fetchData(outletId) }
                             }
                         }
@@ -137,23 +192,50 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                 val countersDef = async { service.getCounterStatus(outletId) }
                 val statusDef = async { service.getBranchStatus(outletId) }
 
-                val data = dataDef.await()
-                val counters = countersDef.await()
-                val branch = statusDef.await()
+                val res1 = dataDef.await()
+                val res2 = countersDef.await()
+                val res3 = statusDef.await()
 
-                lastSuccessfulData = Triple(data, counters, branch)
-                lastSuccessTime = System.currentTimeMillis()
-                
-                // --- Audio Announcement Logic ---
-                val currentToken = data.inService.firstOrNull()
-                if (currentToken != null && (currentToken.id != lastAnnouncedTokenId || currentToken.counterNumber != lastAnnouncedCounter)) {
-                    Log.d("DQMP_AUDIO", "New token call: ${currentToken.tokenNumber}")
-                    _announcementEvent.emit(Triple(currentToken.tokenNumber.toString(), currentToken.counterNumber, currentToken.customer?.name))
-                    lastAnnouncedTokenId = currentToken.id
-                    lastAnnouncedCounter = currentToken.counterNumber
+                if (res1.isSuccessful && res2.isSuccessful && res3.isSuccessful) {
+                    val data = res1.body()!!
+                    val counters = res2.body()!!
+                    val branch = res3.body()!!
+
+                    // --- Sync Clock Skew ---
+                    res1.headers()["Date"]?.let { serverDateStr ->
+                        try {
+                            val sdf = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", java.util.Locale.US)
+                            val serverDate = sdf.parse(serverDateStr)
+                            serverDate?.let {
+                                currentSkew = it.time - System.currentTimeMillis()
+                                Log.d("DQMP_TIME", "Clock Skew updated: ${currentSkew}ms")
+                            }
+                        } catch (e: Exception) { Log.e("DQMP_TIME", "Failed to parse server date", e) }
+                    }
+
+                    lastSuccessfulData = Triple(data, counters, branch)
+                    lastSuccessTime = System.currentTimeMillis()
+                    
+                    // --- Audio Announcement Logic ---
+                    val currentToken = data.inService.firstOrNull()
+                    if (currentToken != null && (currentToken.id != lastAnnouncedTokenId || currentToken.counterNumber != lastAnnouncedCounter)) {
+                        Log.d("DQMP_AUDIO", "New token call: ${currentToken.tokenNumber}")
+                        _announcementEvent.emit(
+                            TokenCallEvent(
+                                tokenNumber = currentToken.tokenNumber.toString(),
+                                counterNumber = currentToken.counterNumber,
+                                customerName = currentToken.customer?.name,
+                                preferredLanguage = currentToken.customer?.preferredLanguage ?: "en"
+                            )
+                        )
+                        lastAnnouncedTokenId = currentToken.id
+                        lastAnnouncedCounter = currentToken.counterNumber
+                    }
+                    
+                    _state.value = DisplayState.Success(data, counters, branch, clockSkew = currentSkew, baseUrl = activeBaseUrl)
+                } else {
+                    throw Exception("API Error: ${res1.code()} / ${res2.code()} / ${res3.code()}")
                 }
-                
-                _state.value = DisplayState.Success(data, counters, branch)
             }
         } catch (e: Exception) {
             handleFetchError(e, outletId)
@@ -165,7 +247,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         val cache = lastSuccessfulData
         if (cache != null && System.currentTimeMillis() - lastSuccessTime < 60000) {
             // Show stale data for up to 60 seconds of failure
-            _state.value = DisplayState.Success(cache.first, cache.second, cache.third, isStale = true, lastSync = lastSuccessTime)
+            _state.value = DisplayState.Success(cache.first, cache.second, cache.third, isStale = true, lastSync = lastSuccessTime, clockSkew = currentSkew)
         } else {
             // Transition to full error screen if offline too long or no cache
             _state.value = DisplayState.Error("Sync Failed: ${e.localizedMessage}", outletId)
@@ -195,7 +277,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
 
     fun saveSettings(outletId: String, baseUrl: String) {
         if (outletId == "TEST_AUDIO") {
-            viewModelScope.launch { _announcementEvent.emit(Triple("101", 5, "Sample Customer")) }
+            viewModelScope.launch { _announcementEvent.emit(TokenCallEvent("101", 5, "Sample Customer", "en")) }
             return
         }
         viewModelScope.launch {

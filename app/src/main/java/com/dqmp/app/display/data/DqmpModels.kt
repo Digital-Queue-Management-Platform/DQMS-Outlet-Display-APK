@@ -25,7 +25,8 @@ data class Token(
 
 @Serializable
 data class Customer(
-    val name: String? = null
+    val name: String? = null,
+    val preferredLanguage: String? = null
 )
 
 @Serializable
