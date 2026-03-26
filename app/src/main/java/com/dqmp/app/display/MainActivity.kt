@@ -14,6 +14,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import androidx.compose.ui.unit.dp
@@ -86,13 +93,73 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         is DisplayState.Loading -> LoadingUI("Connecting to SLT Cloud...")
-                        is DisplayState.Success -> DisplayScreen(
-                            s.data, 
-                            s.counters, 
-                            s.branchStatus, 
-                            s.isStale,
-                            s.lastSync
-                        )
+                         is DisplayState.Success -> {
+                            val fullUrl = "${s.baseUrl}display/outlet/${s.outletId}?apk=true"
+                            var audioUnlockedNatively by remember { mutableStateOf(false) }
+                            val focusRequester = remember { FocusRequester() }
+                            
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                WebViewScreen(url = fullUrl, triggerUnlock = audioUnlockedNatively) { error ->
+                                    Log.e("DQMP_WEB", "WebView Encountered Error: $error")
+                                }
+
+                                // Native Stale Overlay
+                                if (s.isStale) {
+                                    Surface(
+                                        modifier = Modifier.padding(16.dp).align(Alignment.TopCenter),
+                                        color = Color.Red.copy(alpha = 0.8f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("RECONNECTING...", color = Color.White, modifier = Modifier.padding(8.dp), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                // FOOLPROOF NATIVE AUDIO UNLOCK OVERLAY
+                                if (!audioUnlockedNatively) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                Icons.Default.VolumeUp,
+                                                null,
+                                                tint = Emerald500,
+                                                modifier = Modifier.size(80.dp)
+                                            )
+                                            Spacer(Modifier.height(24.dp))
+                                            Text(
+                                                "AUDIO IS READY",
+                                                style = MaterialTheme.typography.headlineLarge,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                "Press the center button on your remote to start.",
+                                                color = Color.White.copy(alpha = 0.7f),
+                                                modifier = Modifier.padding(vertical = 12.dp)
+                                            )
+                                            Spacer(Modifier.height(32.dp))
+                                            
+                                            // The Native Button: 100% focusable by D-pad
+                                            Button(
+                                                onClick = {
+                                                    audioUnlockedNatively = true
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
+                                                shape = RoundedCornerShape(16.dp),
+                                                modifier = Modifier.height(64.dp).width(240.dp).focusRequester(focusRequester)
+                                            ) {
+                                                Text("START DISPLAY", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                                            }
+                                            
+                                            LaunchedEffect(Unit) {
+                                                focusRequester.requestFocus()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         is DisplayState.Error -> ErrorUI(s.message, { viewModel.retry() }, { viewModel.resetApp() })
                     }
                 }
@@ -104,28 +171,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 
-                // --- Audio Announcement Observer ---
+                // --- Audio Announcements Handled by Web Dashboard ---
+                // We keep the logic commented out so it can be re-enabled if needed later.
+                /*
                 LaunchedEffect(Unit) {
                     viewModel.announcementEvent.collect { (token, counter, name) ->
-                        Log.d("DQMP_AUDIO", "MainActivity caught announcement event. Starting Ding/TTS sequence.")
-                        // 1. Play Ding
-                        try {
-                            val mp = MediaPlayer.create(this@MainActivity, R.raw.ding)
-                            mp.setOnCompletionListener { it.release() }
-                            mp.start()
-                        } catch (e: Exception) { Log.e("DQMP_AUDIO", "Ding failed", e) }
-                        
-                        // 2. Build Phrase
-                        val phrase = buildString {
-                            if (!name.isNullOrBlank()) append("Now serving $name. ")
-                            append("Token $token. ")
-                            if (counter != null) append("Please proceed to counter $counter.")
-                        }
-                        
-                        delay(1200) // Brief pause after ding
-                        tts?.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, null)
+                        // (Internal native TTS logic...)
                     }
                 }
+                */
             }
         }
     }

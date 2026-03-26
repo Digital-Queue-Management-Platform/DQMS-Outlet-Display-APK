@@ -24,6 +24,8 @@ sealed class DisplayState {
         val data: DisplayData,
         val counters: List<CounterStatus>,
         val branchStatus: BranchStatusResponse,
+        val outletId: String,
+        val baseUrl: String,
         val isStale: Boolean = false,
         val lastSync: Long = System.currentTimeMillis()
     ) : DisplayState()
@@ -153,19 +155,19 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     lastAnnouncedCounter = currentToken.counterNumber
                 }
                 
-                _state.value = DisplayState.Success(data, counters, branch)
+                _state.value = DisplayState.Success(data, counters, branch, outletId, apiService?.let { repository.baseUrl.first() } ?: "")
             }
         } catch (e: Exception) {
             handleFetchError(e, outletId)
         }
     }
 
-    private fun handleFetchError(e: Exception, outletId: String) {
+    private suspend fun handleFetchError(e: Exception, outletId: String) {
         Log.w("DQMP_VM", "Sync error: ${e.message}")
         val cache = lastSuccessfulData
         if (cache != null && System.currentTimeMillis() - lastSuccessTime < 60000) {
             // Show stale data for up to 60 seconds of failure
-            _state.value = DisplayState.Success(cache.first, cache.second, cache.third, isStale = true, lastSync = lastSuccessTime)
+            _state.value = DisplayState.Success(cache.first, cache.second, cache.third, outletId, repository.baseUrl.first(), isStale = true, lastSync = lastSuccessTime)
         } else {
             // Transition to full error screen if offline too long or no cache
             _state.value = DisplayState.Error("Sync Failed: ${e.localizedMessage}", outletId)

@@ -9,8 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -22,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,89 +51,132 @@ fun DisplayScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Slate900)
+            .background(Slate50)
     ) {
+        // Subtle radial gradient background effect
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Emerald500.copy(alpha = 0.05f), Color.Transparent),
+                        center = androidx.compose.ui.geometry.Offset(0f, 0f),
+                        radius = 1000f
+                    )
+                )
+        )
+
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-            // Top: Branch Name and HUGE Time
+            // Header: Outlet Name, Date/Time, and Summary Boxes
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Left: Outlet Meta
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         data.outletMeta?.name ?: "Outlet Display",
-                        color = Color.White,
+                        color = Slate900,
                         fontSize = 42.sp,
                         fontWeight = FontWeight.Black
                     )
                     Text(
-                        data.outletMeta?.location?.uppercase() ?: "BRANCH ACTIVE",
-                        color = Sky400,
+                        data.outletMeta?.location?.uppercase() ?: "CUSTOMER QUEUE INFORMATION",
+                        color = Slate600,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp
+                        letterSpacing = 1.sp
                     )
-                    
-                    if (isStale) {
-                        Spacer(Modifier.height(8.dp))
-                        Surface(color = Color.Red, shape = RoundedCornerShape(8.dp)) {
-                            Text("OFFLINE (SINCE ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lastSync))})", 
-                                color = Color.White, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp), 
-                                fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
 
-                // Prominent Date and Time
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(currentTime),
-                        color = Emerald500,
-                        fontSize = 64.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(currentTime),
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                // Center: Date and Time
+                Row(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    InfoChip(Icons.Default.DateRange, SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(currentTime), Sky400)
+                    InfoChip(Icons.Default.Timer, SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).format(currentTime), Emerald400)
+                }
+
+                // Right: Summary Boxes
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SummaryBox("Waiting", data.totalWaiting.toString(), Emerald50, Emerald700)
+                    SummaryBox("Serving", data.inService.size.toString(), Sky50, Sky500)
+                    SummaryBox("Counters", data.availableOfficers.toString(), Color(0xFFEEF2FF), Color(0xFF4F46E5))
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            // Notices (if any)
+            val activeNotice = branchStatus.activeNotice ?: branchStatus.standardNotice
+            if (activeNotice != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    color = Color(0xFFFFFBEB), // Amber 50
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)) // Amber 200
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, null, tint = Color(0xFFD97706), modifier = Modifier.size(24.dp))
+                        Column {
+                            Text(activeNotice.title, color = Color(0xFF92400E), fontWeight = FontWeight.Black, fontSize = 20.sp)
+                            if (activeNotice.message.isNotEmpty()) {
+                                Text(activeNotice.message, color = Color(0xFFB45309), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
 
-            // Middle: NOW SERVING (Huge Cards)
-            Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                SectionHeader("Now Serving", Emerald500)
-                Spacer(Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Main Content Area
+            Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 
-                if (data.inService.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Slate800.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                        Text("No active calls at the moment.", color = Slate500, style = MaterialTheme.typography.headlineLarge)
-                    }
-                } else {
-                    Row(modifier = Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        data.inService.take(2).forEach { token ->
-                            ServingTokenCard(token, modifier = Modifier.weight(1f))
+                // Left Column: Now Serving and Up Next
+                Column(modifier = Modifier.weight(if (data.displaySettings?.counters == true) 2f else 3f)) {
+                    
+                    // Now Serving Section
+                    SectionHeader("Now Serving", Icons.Default.Star, Emerald500)
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Box(modifier = Modifier.weight(1.5f).fillMaxWidth()) {
+                        if (data.inService.isEmpty()) {
+                            EmptyStateCard("No token is currently in service.")
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                data.inService.take(2).forEach { token ->
+                                    ServingTokenCard(token, modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // Up Next Section
+                    SectionHeader("Up Next", Icons.Default.Receipt, Sky500)
+                    Spacer(Modifier.height(16.dp))
+                    UpNextMarquee(data.waiting, modifier = Modifier.weight(1f))
+                }
+
+                // Right Column: Counter Status (if enabled)
+                if (data.displaySettings?.counters == true) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionHeader("Counter Status", Icons.Default.People, Color(0xFF4F46E5))
+                        Spacer(Modifier.height(16.dp))
+                        CounterStatusList(counters)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Bottom: UP NEXT Marquee
-            Column {
-                SectionHeader("Up Next", Sky400)
-                Spacer(Modifier.height(16.dp))
-                UpNextMarquee(data.waiting)
-            }
-            
-            Spacer(modifier = Modifier.height(48.dp))
-            
             // Footer
+            Spacer(modifier = Modifier.height(32.dp))
             Footer()
         }
 
@@ -145,11 +185,61 @@ fun DisplayScreen(
 }
 
 @Composable
-fun SectionHeader(title: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(10.dp, 32.dp).background(color, RoundedCornerShape(4.dp)))
-        Spacer(Modifier.width(16.dp))
-        Text(title.uppercase(), style = MaterialTheme.typography.headlineSmall, color = color, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
+fun InfoChip(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, color: Color) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+            Text(text, color = Slate700, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
+    }
+}
+
+@Composable
+fun SummaryBox(label: String, value: String, bgColor: Color, textColor: Color) {
+    Surface(
+        modifier = Modifier.width(100.dp),
+        color = bgColor,
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, textColor.copy(alpha = 0.2f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(label.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Black, color = textColor.copy(alpha = 0.7f), letterSpacing = 1.sp)
+            Text(value, fontSize = 28.sp, fontWeight = FontWeight.Black, color = Slate900)
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
+        Text(title, fontSize = 24.sp, color = Slate900, fontWeight = FontWeight.Black)
+    }
+}
+
+@Composable
+fun EmptyStateCard(message: String) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Slate100.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(32.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, Slate200)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(message, color = Slate500, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
@@ -157,67 +247,164 @@ fun SectionHeader(title: String, color: Color) {
 fun ServingTokenCard(token: Token, modifier: Modifier) {
     val infiniteTransition = rememberInfiniteTransition()
     val pulse by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing), RepeatMode.Reverse)
+        initialValue = 1f, targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), RepeatMode.Reverse)
     )
 
     Surface(
         modifier = modifier
             .fillMaxHeight()
-            .graphicsLayer { scaleX = pulse; scaleY = pulse }
-            .border(4.dp, Emerald400.copy(alpha = 0.5f), RoundedCornerShape(48.dp)),
-        color = Color(0xFF1E293B), // Explicit Slate800
-        shape = RoundedCornerShape(48.dp)
+            .graphicsLayer { scaleX = pulse; scaleY = pulse },
+        color = Emerald50,
+        shape = RoundedCornerShape(32.dp),
+        border = androidx.compose.foundation.BorderStroke(3.dp, Emerald200),
+        shadowElevation = 4.dp
     ) {
         Column(
-            modifier = Modifier.padding(48.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(24.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(token.customer?.name ?: "NOW SERVING", color = Emerald400, fontSize = 28.sp, fontWeight = FontWeight.Black)
-            
-            Spacer(Modifier.height(16.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (token.counterNumber != null) "COUNTER #${token.counterNumber}" else "STAFF STATION",
+                    color = Emerald700,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black
+                )
+                if (!token.serviceTypes.isNullOrEmpty()) {
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Text(
+                            token.serviceTypes[0],
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            color = Emerald600,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
             
             Text(
                 token.tokenNumber.toString().padStart(3, '0'),
-                fontSize = 160.sp,
-                color = Color.White,
+                fontSize = 120.sp,
+                color = Slate900,
                 fontWeight = FontWeight.Black,
-                lineHeight = 160.sp
+                lineHeight = 120.sp
             )
             
-            Spacer(Modifier.height(16.dp))
+            Text(
+                token.customer?.name ?: "NOW SERVING",
+                color = Slate700,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
-            Surface(color = Emerald500, shape = RoundedCornerShape(12.dp)) {
-                Text(
-                    "COUNTER ${token.counterNumber ?: "?"}", 
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                    color = Color.White, 
-                    fontSize = 32.sp, 
-                    fontWeight = FontWeight.Black
-                )
+@Composable
+fun UpNextMarquee(tokens: List<Token>, modifier: Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.White,
+        shape = RoundedCornerShape(32.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200)
+    ) {
+        if (tokens.isEmpty()) {
+            Box(contentAlignment = Alignment.Center) {
+                Text("No tokens waiting.", color = Slate400, fontSize = 18.sp)
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items(tokens) { token ->
+                    Surface(
+                        modifier = Modifier.width(200.dp),
+                        color = Slate50,
+                        shape = RoundedCornerShape(24.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                "TOKEN",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate500
+                            )
+                            Text(
+                                token.tokenNumber.toString().padStart(3, '0'),
+                                fontSize = 48.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Slate900
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun UpNextMarquee(tokens: List<Token>) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp),
-        modifier = Modifier.fillMaxWidth()
+fun CounterStatusList(counters: List<CounterStatus>) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White,
+        shape = RoundedCornerShape(32.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Slate200)
     ) {
-        items(tokens) { token ->
-            Surface(
-                color = Slate800,
-                shape = RoundedCornerShape(20.dp),
-                border = androidx.compose.foundation.BorderStroke(2.dp, Slate700),
-                modifier = Modifier.width(220.dp)
-            ) {
-                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(token.tokenNumber.toString().padStart(3, '0'), color = Color.White, fontSize = 56.sp, fontWeight = FontWeight.Black)
-                    Text("WAITING", color = Sky400, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(counters.filter { it.number != null }) { counter ->
+                val status = counter.officer?.status ?: "offline"
+                val (bgColor, textColor, statusText) = when (status) {
+                    "available" -> Triple(Emerald50, Emerald700, "Online")
+                    "serving" -> Triple(Sky50, Sky500, "Serving")
+                    "on_break" -> Triple(Color(0xFFFFF7ED), Color(0xFFC2410C), "On Break")
+                    else -> Triple(Slate100, Slate500, "Offline")
+                }
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = bgColor,
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, textColor.copy(alpha = 0.1f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(40.dp),
+                            color = textColor,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(counter.number.toString(), color = Color.White, fontWeight = FontWeight.Black)
+                            }
+                        }
+                        Column {
+                            Text("Counter #${counter.number}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Slate900)
+                            Text(statusText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textColor)
+                        }
+                    }
                 }
             }
         }
@@ -226,26 +413,18 @@ fun UpNextMarquee(tokens: List<Token>) {
 
 @Composable
 fun Footer() {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        Image(painter = painterResource(R.drawable.logo), contentDescription = null, modifier = Modifier.height(56.dp))
-        Spacer(Modifier.width(32.dp)); Box(Modifier.width(2.dp).height(56.dp).background(Slate700)); Spacer(Modifier.width(32.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(painter = painterResource(R.drawable.logo), contentDescription = null, modifier = Modifier.height(48.dp))
+        Spacer(Modifier.width(24.dp))
+        Box(Modifier.width(1.dp).height(40.dp).background(Slate200))
+        Spacer(Modifier.width(24.dp))
         Column {
-            Text("Digital Queue Management Platform", fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color.White)
-            Text("Powered by SLT-Mobitel Digital Operations Group", fontSize = 16.sp, color = Slate500)
-        }
-    }
-}
-
-@Composable
-fun NoticeBar(notice: Notice, isCritical: Boolean) {
-    val bg = if (isCritical) Color(0x66FF0000) else Color(0x66FFA500)
-    val color = if (isCritical) Color.Red else Color(0xFFFFA500)
-    
-    Surface(color = bg, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(2.dp, color.copy(alpha = 0.8f))) {
-        Row(modifier = Modifier.fillMaxWidth().padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Warning, null, tint = color, modifier = Modifier.size(32.dp))
-            Spacer(Modifier.width(24.dp))
-            Text(notice.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("Digital Queue Management Platform", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Slate900)
+            Text("Powered by SLT-Mobitel Digital Operations Group", fontSize = 12.sp, color = Slate500)
         }
     }
 }
