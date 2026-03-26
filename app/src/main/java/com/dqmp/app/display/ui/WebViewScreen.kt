@@ -39,14 +39,11 @@ fun WebViewScreen(
                     @android.webkit.JavascriptInterface
                     fun isNative(): Boolean = true
                 }, "AndroidApp")
-
                 webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                        super.onPageStarted(view, url, favicon)
-                    }
-
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
+                        // Inject a foolproof flag that the web app can see
+                        view?.evaluateJavascript("window.DQMP_NATIVE = true;", null)
                     }
 
                     @SuppressLint("WebViewClientOnReceivedSslError")
