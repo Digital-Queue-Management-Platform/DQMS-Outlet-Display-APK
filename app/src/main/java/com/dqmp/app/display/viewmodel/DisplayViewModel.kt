@@ -46,6 +46,9 @@ data class TokenCallEvent(
 class DisplayViewModel(private val repository: SettingsRepository) : ViewModel() {
     private val _state = MutableStateFlow<DisplayState>(DisplayState.Initial)
     val state: StateFlow<DisplayState> = _state
+    
+    private val _showSettings = MutableStateFlow(false)
+    val showSettings: StateFlow<Boolean> = _showSettings
 
     private var pollingJob: Job? = null
     private var webSocket: WebSocket? = null
@@ -283,5 +286,21 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         viewModelScope.launch {
             repository.saveSettings(outletId, baseUrl)
         }
+    }
+
+    fun updateDisplaySettings(settings: DisplaySettings) {
+        val currentState = _state.value
+        if (currentState is DisplayState.Success) {
+            val updatedData = currentState.data.copy(displaySettings = settings)
+            _state.value = currentState.copy(data = updatedData)
+        }
+    }
+
+    fun toggleSettings() {
+        _showSettings.value = !_showSettings.value
+    }
+
+    fun hideSettings() {
+        _showSettings.value = false
     }
 }

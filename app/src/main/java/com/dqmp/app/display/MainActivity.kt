@@ -23,7 +23,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.dqmp.app.display.data.SettingsRepository
+import com.dqmp.app.display.data.ConfigurationManager
+import com.dqmp.app.display.data.DisplaySettings
+import com.dqmp.app.display.audio.ProfessionalAudioManager
 import com.dqmp.app.display.ui.*
 import com.dqmp.app.display.ui.theme.DqmpNativeTheme
 import com.dqmp.app.display.ui.theme.Emerald500
@@ -35,15 +40,34 @@ class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var backPressCount = 0
     private var lastBackPressTime = 0L
+    private var menuPressCount = 0
+    private var lastMenuPressTime = 0L
+    
+    // Professional components
+    private var displayViewModel: DisplayViewModel? = null
+    private var configurationManager: ConfigurationManager? = null
+    private var audioManager: ProfessionalAudioManager? = null
 
     override fun onDestroy() {
         tts?.stop()
         tts?.shutdown()
+        audioManager?.shutdown()
         super.onDestroy()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Check if launched from boot
+        val autoStart = intent.getBooleanExtra("auto_start", false)
+        val kioskMode = intent.getBooleanExtra("kiosk_mode", false)
+        
+        if (autoStart) {
+            Log.i("DQMP_MAIN", "App launched automatically on boot")
+        }
+        
+        // Initialize professional components
+        configurationManager = ConfigurationManager(this)
         
         // Initialize TTS
         tts = TextToSpeech(this) { status ->
@@ -52,13 +76,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         
-        // --- Immersive Mode & App Shell Hardware setup ---
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
-        controller.hide(WindowInsetsCompat.Type.systemBars())
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
+        // Initialize Professional Audio Manager
+        audioManager = ProfessionalAudioManager(this, lifecycleScope)
+        
+        // --- Enhanced Immersive Mode & Kiosk Setup ---
+        setupKioskMode(kioskMode)
+        
         // --- Core Application Dependencies ---
         val repository = SettingsRepository(applicationContext)
         val factory = object : ViewModelProvider.Factory {
@@ -67,34 +90,71 @@ class MainActivity : ComponentActivity() {
                 return DisplayViewModel(repository) as T
             }
         }
+        
+        displayViewModel = ViewModelProvider(this, factory)[DisplayViewModel::class.java]
 
         setContent {
             DqmpNativeTheme {
-                val viewModel: DisplayViewModel = viewModel(factory = factory)
+                val viewModel: DisplayViewModel = displayViewModel!!
                 val state by viewModel.state.collectAsState()
+                val showSettings by viewModel.showSettings.collectAsState()
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    when (val s = state) {
-                        is DisplayState.Initial -> LoadingUI("Starting DQMP...")
-                        is DisplayState.Setup -> {
-                            // Fetch existing URL snapshot if any
-                            SetupScreen(SettingsRepository.DEFAULT_URL) { id, url ->
-                                viewModel.saveSettings(id, url)
+                    Box {
+                        when (val s = state) {
+                            is DisplayState.Initial -> LoadingUI("Starting DQMP...")
+                            is DisplayState.Setup -> {
+                                // Check if device is already configured
+                                val isConfigured = configurationManager?.isConfigured() ?: false
+                                if (isConfigured) {
+                                    // Auto-load saved configuration
+                                    LaunchedEffect(Unit) {
+                                        val config = configurationManager?.getConfiguration()
+                                        config?.let { 
+                                            viewModel.saveSettings(it.outletId, it.baseUrl)
+                                        }
+                                    }
+                                    LoadingUI("Loading saved configuration...")
+                                } else {
+                                    // Show QR code setup for new device
+                                    QRCodeSetupScreen(
+                                        onConfigurationReceived = { outletId, baseUrl ->
+                                            viewModel.saveSettings(outletId, baseUrl)
+                                        },
+                                        onManualSetup = {
+                                            // Fall back to manual setup
+                                        }
+                                    )
+                                }
+                            }
+                            is DisplayState.Loading -> LoadingUI("Connecting to SLT Cloud...")
+                            is DisplayState.Success -> EnhancedDisplayScreen(
+                                s.data, 
+                                s.counters, 
+                                s.branchStatus, 
+                                s.isStale,
+                                s.lastSync,
+                                s.clockSkew
+                            )
+                            is DisplayState.Error -> ErrorUI(s.message, { viewModel.retry() }, { viewModel.resetApp() })
+                        }
+
+                        // Settings Overlay
+                        if (showSettings) {
+                            val successState = state as? DisplayState.Success
+                            if (successState != null) {
+                                DisplaySettingsScreen(
+                                    currentSettings = successState.data.displaySettings ?: DisplaySettings(),
+                                    onSettingsChange = { newSettings ->
+                                        viewModel.updateDisplaySettings(newSettings)
+                                    },
+                                    onClose = { viewModel.hideSettings() }
+                                )
                             }
                         }
-                        is DisplayState.Loading -> LoadingUI("Connecting to SLT Cloud...")
-                        is DisplayState.Success -> DisplayScreen(
-                            s.data, 
-                            s.counters, 
-                            s.branchStatus, 
-                            s.isStale,
-                            s.lastSync,
-                            s.clockSkew
-                        )
-                        is DisplayState.Error -> ErrorUI(s.message, { viewModel.retry() }, { viewModel.resetApp() })
                     }
                 }
                 
@@ -221,9 +281,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun setupKioskMode(enableKiosk: Boolean) {
+        // Enhanced Immersive Mode & App Shell Hardware setup
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        
+        // Professional display settings
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+        )
+        
+        // Set brightness to maximum for retail visibility
+        window.attributes = window.attributes.apply {
+            screenBrightness = 1.0f
+        }
+        
+        if (enableKiosk) {
+            Log.i("DQMP_KIOSK", "Kiosk mode enabled - device locked to DQMP display")
+        }
+    }
+    
     /**
-     * Secret Admin Mechanism for Field Engineers.
-     * Tapping BACK 5 times in 2 seconds resets the display.
+     * Professional Key Event Handler for TV Remote Navigation
+     * - BACK 5 times: Emergency reset (field engineer access)
+     * - MENU 3 times: Open display settings (technician access)
+     * - No timeouts - runs indefinitely
      */
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
@@ -236,22 +323,51 @@ class MainActivity : ComponentActivity() {
             lastBackPressTime = now
             
             if (backPressCount >= 5) {
-                Log.w("DQMP_RESET", "Admin Reset sequence detected. Clearing DataStore.")
-                // Global restart via ViewModel/Repository triggered by re-rendering 
-                // is cleaner than an Intent restart in this architecture.
-                val repository = SettingsRepository(applicationContext)
-                val factory = object : ViewModelProvider.Factory {
-                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                        @Suppress("UNCHECKED_CAST")
-                        return DisplayViewModel(repository) as T
+                Log.w("DQMP_ADMIN", "Emergency admin reset sequence detected")
+                
+                try {
+                    // Clear configuration
+                    lifecycleScope.launch {
+                        configurationManager?.clearConfiguration()
                     }
+                    
+                    // Reset ViewModel
+                    displayViewModel?.resetApp()
+                    
+                    // Reset audio
+                    audioManager?.clearQueue()
+                    
+                    Log.i("DQMP_ADMIN", "Complete system reset performed")
+                    
+                } catch (e: Exception) {
+                    Log.e("DQMP_ADMIN", "Reset failed", e)
                 }
-                val vm = ViewModelProvider(this, factory)[DisplayViewModel::class.java]
-                vm.resetApp()
+                
                 backPressCount = 0
                 return true
             }
         }
+        
+        if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_TV_INPUT) {
+            val now = System.currentTimeMillis()
+            if (now - lastMenuPressTime < 1000) {
+                menuPressCount++
+            } else {
+                menuPressCount = 1
+            }
+            lastMenuPressTime = now
+            
+            if (menuPressCount >= 3) {
+                Log.i("DQMP_SETTINGS", "Professional settings access sequence detected")
+                
+                // Toggle settings screen
+                displayViewModel?.toggleSettings()
+                
+                menuPressCount = 0
+                return true
+            }
+        }
+        
         return super.onKeyUp(keyCode, event)
     }
 }

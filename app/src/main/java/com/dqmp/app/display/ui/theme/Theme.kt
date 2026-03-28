@@ -25,6 +25,8 @@ val Sky100 = Color(0xFFE0F2FE)
 val Sky200 = Color(0xFFBAE6FD)
 val Sky400 = Color(0xFF38BDF8)
 val Sky500 = Color(0xFF0EA5E9)
+val Sky600 = Color(0xFF0284C7)
+val Sky700 = Color(0xFF0369A1)
 
 val Slate50 = Color(0xFFF8FAFC)
 val Slate100 = Color(0xFFF1F5F9)
@@ -36,6 +38,10 @@ val Slate600 = Color(0xFF475569)
 val Slate700 = Color(0xFF334155)
 val Slate800 = Color(0xFF1E293B)
 val Slate900 = Color(0xFF0F172A)
+
+val Orange400 = Color(0xFFFB923C)
+val Orange500 = Color(0xFFF97316)
+val Orange600 = Color(0xFFEA580C)
 
 val ColorScheme = lightColorScheme(
     primary = Emerald500,

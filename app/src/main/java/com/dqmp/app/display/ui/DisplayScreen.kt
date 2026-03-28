@@ -119,13 +119,6 @@ fun DisplayScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Notice Bar
-            val notice = branchStatus.activeNotice ?: branchStatus.standardNotice
-            if (notice != null) {
-                NoticeBar(notice = notice, isCritical = branchStatus.activeNotice != null)
-                Spacer(modifier = Modifier.height(20.dp))
-            }
-
             // Body: Now Serving & Up Next side-by-side with Auto-Sliding
             Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 // Section: Now Serving (Horizontal Sliding)
@@ -353,24 +346,6 @@ fun SectionHeader(title: String, color: Color, icon: ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(icon, null, tint = color, modifier = Modifier.size(24.dp))
         Text(text = title, color = Slate900, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-fun NoticeBar(notice: Notice, isCritical: Boolean) {
-    val bg = if (isCritical) Color(0xFFFFFBEC) else Color(0xFFF0FDF4)
-    val color = if (isCritical) Color(0xFFD97706) else Emerald600
-    val borderColor = if (isCritical) Color(0xFFFCD34D) else Emerald200
-    Surface(color = bg, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(Icons.Default.Warning, null, tint = color, modifier = Modifier.size(28.dp))
-            Column {
-                Text(notice.title, color = Slate900, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                if (notice.message.isNotEmpty()) {
-                    Text(notice.message, color = Slate600, fontSize = 14.sp)
-                }
-            }
-        }
     }
 }
 
