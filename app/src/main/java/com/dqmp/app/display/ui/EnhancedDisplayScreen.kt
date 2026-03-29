@@ -403,18 +403,19 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(-2.dp)
             ) {
-                // Logo row with left and right alignment, centered text
+                // Grouped content with logos close to text
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left: SLT Logo (increased size)
+                    // Left: SLT Logo
                     Image(
                         painter = painterResource(id = R.drawable.logo),
                         contentDescription = "SLT-Mobitel Logo",
                         modifier = Modifier.height(32.dp).padding(vertical = 2.dp)
                     )
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
                     
                     // Center: Platform Title
                     Text(
@@ -425,7 +426,9 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                         textAlign = TextAlign.Center
                     )
                     
-                    // Right: Transzent Logo (increased size)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    // Right: Transzent Logo
                     Image(
                         painter = painterResource(id = R.drawable.transzent_logo),
                         contentDescription = "Transzent Logo",
