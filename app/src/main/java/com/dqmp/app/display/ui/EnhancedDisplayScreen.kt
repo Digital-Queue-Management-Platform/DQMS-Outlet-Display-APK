@@ -2,6 +2,7 @@ package com.dqmp.app.display.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -112,56 +114,73 @@ fun EnhancedDisplayScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Main Content Grid
-            Row(
+            // Main Content - EXACT WEB DASHBOARD REPLICA
+            Column(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Left Column: Now Serving and Up Next
-                Column(
-                    modifier = Modifier.weight(if ((settings?.counters == true) || (settings?.recent == true)) 3f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                // Now Serving Section - matches web exactly
+                WebStyleContentCard(
+                    modifier = Modifier.weight(1.2f),
+                    title = "Now Serving",
+                    icon = Icons.Default.AutoAwesome // Sparkles equivalent
                 ) {
-                    // Now Serving Section
-                    NowServingSection(
-                        modifier = Modifier.weight(1.2f),
-                        tokens = data.inService,
-                        showServices = settings?.services ?: true,
-                        autoSlide = settings?.autoSlide ?: true
-                    )
-
-                    // Up Next Section  
-                    UpNextSection(
-                        modifier = Modifier.weight(1f),
-                        tokens = data.waiting.take(settings?.next ?: 8),
-                        showServices = settings?.services ?: true,
-                        autoSlide = settings?.autoSlide ?: true
-                    )
+                    if (data.inService.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No token is currently in service.",
+                                color = Slate600,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else {
+                        WebStyleTokenList(
+                            tokens = data.inService,
+                            backgroundColor = Color(0xFFECFDF5), // bg-emerald-50
+                            borderColor = Color(0xFFA7F3D0), // border-emerald-200
+                            showServices = settings?.services ?: true,
+                            autoSlide = settings?.autoSlide ?: true,
+                            isServing = true
+                        )
+                    }
                 }
-
-                // Right Column: Counter Status and Recent Calls (if enabled)
-                if ((settings?.counters == true) || (settings?.recent == true)) {
-                    Column(
-                        modifier = Modifier.weight(2f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Counter Status Panel
-                        if (settings.counters == true) {
-                            CounterStatusSection(
-                                modifier = Modifier.weight(1f),
-                                counters = counters,
-                                autoSlide = settings.autoSlide ?: true
+                
+                // Up Next Section - matches web exactly
+                WebStyleContentCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Up Next",
+                    icon = Icons.Default.ConfirmationNumber // Ticket equivalent
+                ) {
+                    val upNext = data.waiting.take(settings?.next ?: 8)
+                    if (upNext.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No waiting tokens right now.",
+                                color = Slate600,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
-
-                        // Recent Calls Panel
-                        if (settings.recent == true) {
-                            RecentCallsSection(
-                                modifier = Modifier.weight(1f),
-                                recentCalls = data.recentlyCalled,
-                                autoSlide = settings.autoSlide ?: true
-                            )
-                        }
+                    } else {
+                        WebStyleTokenList(
+                            tokens = upNext,
+                            backgroundColor = Color(0xFFF8FAFC), // bg-slate-50
+                            borderColor = Color(0xFFE2E8F0), // border-slate-200
+                            showServices = settings?.services ?: true,
+                            autoSlide = settings?.autoSlide ?: true,
+                            isServing = false
+                        )
                     }
                 }
             }
@@ -189,53 +208,58 @@ fun EnhancedHeader(
     availableOfficers: Int,
     isStale: Boolean
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    // Match web dashboard header layout exactly - TV optimized
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Top Row: Outlet info, Date/Time, Status cards
         Row(
-            modifier = Modifier.padding(20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Outlet Info
-            Column(modifier = Modifier.weight(1f)) {
+            // Outlet Info (Left) - matches web grid-cols-1 md:grid-cols-2 2xl:grid-cols-3
+            Column(modifier = Modifier.weight(1.5f)) {
                 Text(
                     text = outletName,
                     color = Slate900,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Black
+                    fontSize = 28.sp, // Reduced for TV screens
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = location,
-                    color = Slate500,
+                    color = Slate600,
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
+                    modifier = Modifier.padding(top = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-
-            // Date and Time Card
+            
+            // Date/Time Card (Center) - matches web dashboard styling
             Card(
+                modifier = Modifier.wrapContentWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Slate50),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate200)
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)) // border-slate-200
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Date section
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             Icons.Default.DateRange, 
                             contentDescription = null, 
                             tint = Sky400, 
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = dateFormat.format(currentTime),
@@ -245,69 +269,150 @@ fun EnhancedHeader(
                         )
                     }
                     
+                    // Divider
                     Box(
                         modifier = Modifier
                             .width(1.dp)
-                            .height(18.dp)
-                            .background(Slate200)
+                            .height(20.dp)
+                            .background(Color(0xFFE2E8F0)) // border-slate-200
                     )
                     
+                    // Time section
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             Icons.Default.Schedule, 
                             contentDescription = null, 
-                            tint = Emerald500, 
-                            modifier = Modifier.size(18.dp)
+                            tint = Emerald400, 
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = timeFormat.format(currentTime),
-                            color = Slate900,
+                            color = Slate700,
                             fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
             }
-
-            // Stats Mini Cards
+            
+            // Status Cards (Right) - exact match to web dashboard
             Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.weight(2f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                StatCard("Waiting", totalWaiting.toString(), Emerald600)
-                StatCard("Serving", serving.toString(), Sky500)
-                StatCard("Counters", availableOfficers.toString(), Color(0xFF4F46E5))
+                // Waiting Card - matches web bg-emerald-50 border-emerald-200
+                WebStyleStatCard(
+                    label = "Waiting",
+                    value = totalWaiting.toString(),
+                    backgroundColor = Color(0xFFECFDF5), // bg-emerald-50
+                    borderColor = Color(0xFFA7F3D0), // border-emerald-200  
+                    textColor = Color(0xFF047857), // text-emerald-700
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // Serving Card - matches web bg-sky-50 border-sky-200
+                WebStyleStatCard(
+                    label = "Serving", 
+                    value = serving.toString(),
+                    backgroundColor = Color(0xFFF0F9FF), // bg-sky-50
+                    borderColor = Color(0xFFBAE6FD), // border-sky-200
+                    textColor = Color(0xFF0369A1), // text-sky-700
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // Counters Card - matches web bg-indigo-50 border-indigo-200  
+                WebStyleStatCard(
+                    label = "Counters",
+                    value = availableOfficers.toString(),
+                    backgroundColor = Color(0xFFF0F0FF), // bg-indigo-50
+                    borderColor = Color(0xFFC7D2FE), // border-indigo-200
+                    textColor = Color(0xFF4338CA), // text-indigo-700
+                    modifier = Modifier.weight(1f)
+                )
             }
-
-            // Status Indicator
-            if (isStale) {
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFF6B6B).copy(alpha = 0.1f))
+        }
+        
+        // Connection status indicator (if stale)
+        if (isStale) {
+            Card(
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFF6B6B).copy(alpha = 0.1f)),
+                border = BorderStroke(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.3f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(Color(0xFFFF6B6B), CircleShape)
-                        )
-                        Text(
-                            text = "OFFLINE",
-                            color = Color(0xFFFF6B6B),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFFF6B6B),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "CONNECTION LOST - Data may be outdated",
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun WebStyleStatCard(
+    label: String,
+    value: String,
+    backgroundColor: Color,
+    borderColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier
+) {
+    // Exact replica of web dashboard stat cards - TV optimized
+    Card(
+        modifier = modifier.height(70.dp), // Reduced height for TV
+        shape = RoundedCornerShape(12.dp), // Slightly smaller radius
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        border = BorderStroke(1.dp, borderColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp), // Reduced padding
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Label text - matches web text-[10px] font-black uppercase tracking-widest opacity-70  
+            Text(
+                text = label.uppercase(),
+                color = textColor.copy(alpha = 0.7f),
+                fontSize = 9.sp, // Slightly smaller for TV
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp, // Reduced letter spacing
+                textAlign = TextAlign.Center,
+                lineHeight = 10.sp
+            )
+            
+            Spacer(modifier = Modifier.height(2.dp))
+            
+            // Value text - matches web font-black text-slate-900 with dynamic fontSize
+            Text(
+                text = value,
+                color = Slate900,
+                fontSize = 20.sp, // Reduced for TV layout
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
@@ -484,6 +589,161 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+// NEW WEB-IDENTICAL COMPONENTS
+
+@Composable
+fun WebStyleContentCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    icon: ImageVector,
+    content: @Composable () -> Unit
+) {
+    // Exact replica of web dashboard content cards: rounded-3xl border shadow-sm bg-white border-slate-200
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp), // rounded-3xl = 24dp
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)), // border-slate-200
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp) // shadow-sm
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp) // p-2 sm:p-4 equivalent
+        ) {
+            // Header with icon and title - matches web exactly
+            Row(
+                modifier = Modifier.padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (title == "Now Serving") Emerald400 else Sky400,
+                    modifier = Modifier.size(20.dp) // w-5 h-5
+                )
+                Text(
+                    text = title,
+                    color = Slate900,
+                    fontSize = 18.sp, // text-base sm:text-lg md:text-xl
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            // Content area
+            Box(modifier = Modifier.weight(1f)) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable 
+fun WebStyleTokenList(
+    tokens: List<Token>,
+    backgroundColor: Color,
+    borderColor: Color,
+    showServices: Boolean,
+    autoSlide: Boolean,
+    isServing: Boolean
+) {
+    if (tokens.isEmpty()) return
+    
+    // Horizontal scrolling token list - matches web marquee
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+    ) {
+        items(tokens) { token ->
+            WebStyleTokenCard(
+                token = token,
+                backgroundColor = backgroundColor,
+                borderColor = borderColor,
+                showService = showServices,
+                isServing = isServing
+            )
+        }
+    }
+}
+
+@Composable
+fun WebStyleTokenCard(
+    token: Token,
+    backgroundColor: Color,
+    borderColor: Color, 
+    showService: Boolean,
+    isServing: Boolean
+) {
+    // Exact replica of web token cards with proper sizing
+    Card(
+        modifier = Modifier
+            .width(200.dp) // w-[min(72vw,230px)] equivalent
+            .height(80.dp),
+        shape = RoundedCornerShape(12.dp), // rounded-xl
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        border = BorderStroke(1.dp, borderColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp) // shadow-sm
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp), // py-2 px-3
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Header row with queue position or service info
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isServing) "Serving" else "Queue",
+                        color = if (isServing) Color(0xFF059669) else Color(0xFF475569), // emerald-700 : slate-700
+                        fontSize = 10.sp, // text-[12px]
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.alpha(0.8f) // opacity-80
+                    )
+                    
+                    if (showService && token.serviceTypes?.isNotEmpty() == true) {
+                        Card(
+                            shape = RoundedCornerShape(6.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = BorderStroke(1.dp, Color(0xFFDEEFFE)), // border-sky-100
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        ) {
+                            Text(
+                                text = token.serviceTypes?.firstOrNull()?.take(8) ?: "",
+                                color = Color(0xFF0284C7), // text-sky-600
+                                fontSize = 9.sp, // text-[11px]
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                // Token number - matches web styling
+                Text(
+                    text = String.format("%03d", token.tokenNumber), // padStart(3, "0")
+                    color = Slate900,
+                    fontSize = 20.sp, // clamp(1.2rem, 8vw, 2.5rem)
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp // tracking-wider
+                )
             }
         }
     }

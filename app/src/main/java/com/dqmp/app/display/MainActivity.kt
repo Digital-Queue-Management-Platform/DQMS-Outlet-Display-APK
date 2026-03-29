@@ -189,6 +189,7 @@ class MainActivity : ComponentActivity() {
                         
                         val phrase = when (event.eventType) {
                             "TEST" -> event.customText ?: "Testing the speakers. It is working fine."
+                            "CONFIG_SUCCESS" -> "" // Just ding, no TTS for configuration success
                             else -> when (lang) {
                                 "si", "sinhala" -> if (isRecall) {
                                     "$firstName. ටෝකන් අංක $num නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටරය $counter වෙත පැමිණෙන්න."
@@ -209,11 +210,15 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         // 3. Play Voice (Stream from Backend to match Web Dashboard)
-                        val baseUrl = (currentState as? DisplayState.Success)?.baseUrl 
-                            ?: SettingsRepository.DEFAULT_URL
-                        
-                        Log.d("DQMP_AUDIO", "Announcement Triggered: Type=$isRecall, Language=$lang, Phrase=$phrase")
-                        speakBackend(baseUrl, phrase, lang)
+                        if (phrase.isNotBlank()) {
+                            val baseUrl = (currentState as? DisplayState.Success)?.baseUrl 
+                                ?: SettingsRepository.DEFAULT_URL
+                            
+                            Log.d("DQMP_AUDIO", "Announcement Triggered: Type=$isRecall, Language=$lang, Phrase=$phrase")
+                            speakBackend(baseUrl, phrase, lang)
+                        } else {
+                            Log.d("DQMP_AUDIO", "Skipping TTS for event type: ${event.eventType}")
+                        }
                     }
                 }
             }
