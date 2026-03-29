@@ -1,6 +1,7 @@
 package com.dqmp.app.display
 
 import kotlinx.coroutines.delay
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
@@ -78,6 +79,12 @@ class MainActivity : ComponentActivity() {
         
         // Initialize Professional Audio Manager
         audioManager = ProfessionalAudioManager(this, lifecycleScope)
+        
+        // Set media volume to maximum for announcements
+        val audioMgr = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val maxVolume = audioMgr.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        audioMgr.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, maxVolume, 0)
+        Log.d("DQMP_AUDIO", "📢 Media volume set to maximum: $maxVolume")
         
         // --- Enhanced Immersive Mode & Kiosk Setup ---
         setupKioskMode(kioskMode)
@@ -168,19 +175,49 @@ class MainActivity : ComponentActivity() {
                 // --- Audio Announcement Observer ---
                 LaunchedEffect(Unit) {
                     viewModel.announcementEvent.collect { event ->
-                        Log.d("DQMP_AUDIO", "MainActivity caught announcement event. Starting Ding/TTS sequence.")
-                        // 1. Play Ding (if enabled)
+                        Log.d("DQMP_AUDIO", "MainActivity caught announcement event: ${event.eventType}")
+                        
+                        // Get current display settings to check if announcements are enabled
                         val currentState = viewModel.state.value
                         val playTone = (currentState as? DisplayState.Success)?.data?.displaySettings?.playTone ?: true
+                        
+                        // 1. Play Chime (if enabled) - EXACTLY like web dashboard
                         if (playTone) {
                             try {
-                                val mp = MediaPlayer.create(this@MainActivity, R.raw.ding)
-                                mp.setOnCompletionListener { it.release() }
-                                mp.start()
-                                delay(1200) // Brief pause after ding
-                            } catch (e: Exception) { Log.e("DQMP_AUDIO", "Ding failed", e) }
+                                val mp = MediaPlayer.create(this@MainActivity, R.raw.announcement)
+                                mp?.let { player ->
+                                    // Set audio attributes for media playback
+                                    player.setAudioAttributes(
+                                        android.media.AudioAttributes.Builder()
+                                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                            .build()
+                                    )
+                                    
+                                    // Set volume to maximum
+                                    player.setVolume(1.0f, 1.0f)
+                                    
+                                    // Get the actual duration of the chime
+                                    val chimeDuration = player.duration
+                                    Log.d("DQMP_AUDIO", "🔊 Playing announcement chime (duration: ${chimeDuration}ms)")
+                                    
+                                    player.setOnCompletionListener { 
+                                        Log.d("DQMP_AUDIO", "✅ Chime playback completed")
+                                        it.release() 
+                                    }
+                                    player.start()
+                                    
+                                    // Wait for chime to finish + 200ms pause (like web dashboard)
+                                    delay(chimeDuration.toLong() + 200L)
+                                } ?: Log.e("DQMP_AUDIO", "❌ Failed to create MediaPlayer for announcement chime")
+                            } catch (e: Exception) { 
+                                Log.e("DQMP_AUDIO", "❌ Announcement chime error: ${e.message}", e) 
+                            }
+                        } else {
+                            Log.d("DQMP_AUDIO", "🔇 Announcement chime disabled by settings")
                         }
-                        // 2. Build Phrase based on language and event type (Align with Web Dashboard)
+                        
+                        // 2. Build Phrase based on language and event type - EXACTLY like web dashboard
                         val lang = event.preferredLanguage?.lowercase() ?: "en"
                         val isRecall = event.eventType == "RECALL"
                         val firstName = event.customerName?.split(" ")?.firstOrNull() ?: ""
@@ -188,7 +225,13 @@ class MainActivity : ComponentActivity() {
                         val counter = event.counterNumber ?: "?"
                         
                         val phrase = when (event.eventType) {
-                            "TEST" -> event.customText ?: "Testing the speakers. It is working fine."
+                            "TEST_CHIME" -> "" // Just chime, no TTS
+                            "TEST_VOICE" -> event.customText ?: when (lang) {
+                                "si", "sinhala" -> "ස්පීකර් පරීක්‍ෂණය. මෙය නිසි ලෙස ක්‍රියාත්මක වේ."
+                                "ta", "tamil" -> "ஒலிபெருக்கி சோதனை. இது சரியாக வேலை செய்கிறது."
+                                else -> "Testing the speakers. It is working fine."
+                            }
+                            "MANUAL_ANNOUNCEMENT" -> event.customText ?: ""
                             "CONFIG_SUCCESS" -> "" // Just ding, no TTS for configuration success
                             else -> when (lang) {
                                 "si", "sinhala" -> if (isRecall) {

@@ -50,4 +50,16 @@ class SettingsRepository(private val context: Context) {
             it.clear()
         }
     }
+    
+    suspend fun clearDeviceId() {
+        context.dataStore.edit {
+            it.remove(KEY_DEVICE_ID)
+        }
+    }
+    
+    suspend fun clearOutletId() {
+        context.dataStore.edit {
+            it.remove(KEY_OUTLET_ID)
+        }
+    }
 }

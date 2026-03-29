@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.TimeUnit
 
 sealed class DisplayState {
     object Initial : DisplayState()
@@ -55,13 +56,20 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private var webSocket: WebSocket? = null
     private var apiService: DqmpApiService? = null
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = OkHttpClient.Builder().build()
+    
+    // Optimized HTTP client for faster loading
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)  // Faster connection timeout
+        .readTimeout(10, TimeUnit.SECONDS)     // Faster read timeout
+        .writeTimeout(10, TimeUnit.SECONDS)    // Faster write timeout
+        .build()
     
     private var activeBaseUrl: String = SettingsRepository.DEFAULT_URL
     
     private var lastSuccessfulData: Triple<DisplayData, List<CounterStatus>, BranchStatusResponse>? = null
     private var lastSuccessTime: Long = 0
     private var currentSkew: Long = 0L
+    private var lastDataHash: Int = 0  // For smart caching to avoid unnecessary UI updates
     
     // For audio announcements
     private val _announcementEvent = MutableSharedFlow<TokenCallEvent>(replay = 0)
@@ -91,6 +99,13 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         activeBaseUrl = baseUrl
         stopAll()
         setupApi(baseUrl)
+        
+        // Immediate data fetch for faster loading (don't wait for polling interval)
+        viewModelScope.launch {
+            Log.d("DQMP_PERF", "Starting immediate data fetch for faster loading")
+            fetchData(outletId)
+        }
+        
         startPolling(outletId)
         startWebSocket(outletId, baseUrl)
     }
@@ -116,9 +131,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                 }
                 
                 fetchData(outletId)
-                // Intelligent polling: Poll less frequently if Websocket is active, 
-                // but poll immediately on errors.
-                delay(if (webSocket != null) 30000 else 10000) 
+                // Aggressive polling for device removal detection:
+                // Check device config more frequently when WebSocket is down
+                delay(if (webSocket != null) 15000 else 3000)  // 15s with WS, 3s without (faster removal detection)
             }
         }
     }
@@ -194,7 +209,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     Log.w("DQMP_VM", "Setup polling error: ${e.message}")
                 }
                 
-                delay(5000) // Check every 5 seconds during setup
+                delay(2000) // Check every 2 seconds during setup (faster QR response)
             }
         }
     }
@@ -217,6 +232,39 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         val incomingId = data?.get("outletId")?.jsonPrimitive?.content
                         
                         if (incomingId == null || incomingId == outletId) {
+                            // Handle device removal events - immediate logout
+                            if (type == "DEVICE_REMOVED") {
+                                val removedDeviceId = data?.get("deviceId")?.jsonPrimitive?.content
+                                Log.w("DQMP_WS", "Device removal event received for deviceId: $removedDeviceId")
+                                
+                                viewModelScope.launch {
+                                    val currentDeviceId = repository.deviceId.first()
+                                    if (removedDeviceId == currentDeviceId) {
+                                        Log.w("DQMP_VM", "This device was removed - immediately returning to setup")
+                                        
+                                        // Clear ALL device configuration immediately
+                                        repository.clearDeviceId()
+                                        repository.clearOutletId() 
+                                        
+                                        // Stop all connections immediately and return to setup
+                                        stopAll()
+                                        _state.value = DisplayState.Setup
+                                        
+                                        // Audio feedback for device removal
+                                        _announcementEvent.emit(
+                                            TokenCallEvent(
+                                                tokenNumber = "Device Removed",
+                                                counterNumber = null,
+                                                customerName = null,
+                                                eventType = "CONFIG_SUCCESS", // Plays ding sound
+                                                customText = "This device has been removed from the outlet display system"
+                                            )
+                                        )
+                                    }
+                                }
+                                return@onMessage // Don't process other events
+                            }
+                            
                             if (type in listOf("TOKEN_CALLED", "TOKEN_RECALLED", "RECALL", "CALL", "TEST_SOUND")) {
                                 Log.d("DQMP_WS", "Update event received: $type. Fetching...")
                                 
@@ -232,14 +280,21 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                                     
                                     val langJson = data?.get("preferredLanguages")
                                     val lang = when {
+                                        type == "TEST_SOUND" -> data?.get("lang")?.jsonPrimitive?.content ?: "en"
                                         langJson is JsonArray && langJson.isNotEmpty() -> langJson[0].jsonPrimitive.content
                                         langJson is JsonPrimitive -> langJson.content
                                         else -> data?.get("preferred_language")?.jsonPrimitive?.content ?: "en"
                                     }
                                     
-                                    val eventType = if (type == "TEST_SOUND") "TEST" 
-                                                   else if (type.contains("RECALL") || type == "RECALL") "RECALL" 
-                                                   else "CALL"
+                                    val eventType = if (type == "TEST_SOUND") {
+                                        val testType = data?.get("testType")?.jsonPrimitive?.content ?: "voice"
+                                        when (testType) {
+                                            "chime" -> "TEST_CHIME"
+                                            "voice" -> "TEST_VOICE"
+                                            else -> "TEST_VOICE"
+                                        }
+                                    } else if (type.contains("RECALL") || type == "RECALL") "RECALL" 
+                                    else "CALL"
                                     
                                     Log.d("DQMP_AUDIO", "Emitting $eventType event for token #$tokenNum")
                                     
@@ -251,7 +306,8 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                                                 customerName = name,
                                                 preferredLanguage = lang,
                                                 eventType = eventType,
-                                                customText = data?.get("text")?.jsonPrimitive?.content
+                                                customText = data?.get("customText")?.jsonPrimitive?.content
+                                                    ?: data?.get("text")?.jsonPrimitive?.content
                                             )
                                         )
                                     }
@@ -263,9 +319,19 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     } catch (e: Exception) { Log.e("DQMP_WS", "Parse error", e) }
                 }
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.w("DQMP_WS", "WS Failure: ${t.message}. Retry in 10s.")
+                    Log.w("DQMP_WS", "WS Failure: ${t.message}. Checking device config and retrying in 3s.")
                     this@DisplayViewModel.webSocket = null
-                    viewModelScope.launch { delay(10000); startWebSocket(outletId, baseUrl) }
+                    
+                    // Immediate configuration check when WebSocket fails (could indicate device removal)
+                    viewModelScope.launch { 
+                        if (!checkDeviceConfiguration()) {
+                            Log.w("DQMP_VM", "Device removed - WebSocket failure triggered config check")
+                            _state.value = DisplayState.Setup
+                            return@launch
+                        }
+                        delay(3000) 
+                        startWebSocket(outletId, baseUrl) 
+                    }
                 }
             })
         } catch (e: Exception) { Log.e("DQMP_WS", "Failed to construct WS URL", e) }
@@ -307,6 +373,11 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     lastSuccessfulData = Triple(data, counters, branch)
                     lastSuccessTime = System.currentTimeMillis()
                     
+                    // Smart caching: Only update UI if data actually changed
+                    val newDataHash = data.hashCode() + counters.hashCode() + branch.hashCode()
+                    val dataChanged = newDataHash != lastDataHash
+                    lastDataHash = newDataHash
+                    
                     // --- Audio Announcement Logic ---
                     val currentToken = data.inService.firstOrNull()
                     if (currentToken != null && (currentToken.id != lastAnnouncedTokenId || currentToken.counterNumber != lastAnnouncedCounter)) {
@@ -323,7 +394,13 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         lastAnnouncedCounter = currentToken.counterNumber
                     }
                     
-                    _state.value = DisplayState.Success(data, counters, branch, clockSkew = currentSkew, baseUrl = activeBaseUrl)
+                    // Only update UI state if data actually changed (performance optimization)
+                    if (dataChanged || _state.value !is DisplayState.Success) {
+                        _state.value = DisplayState.Success(data, counters, branch, clockSkew = currentSkew, baseUrl = activeBaseUrl)
+                        Log.d("DQMP_PERF", "UI updated due to data change")
+                    } else {
+                        Log.d("DQMP_PERF", "Skipped UI update - data unchanged")
+                    }
                 } else {
                     throw Exception("API Error: ${res1.code()} / ${res2.code()} / ${res3.code()}")
                 }
