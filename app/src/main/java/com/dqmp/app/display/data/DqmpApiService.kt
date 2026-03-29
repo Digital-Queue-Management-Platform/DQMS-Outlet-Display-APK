@@ -15,4 +15,7 @@ interface DqmpApiService {
 
     @GET("api/branch-status/{id}")
     suspend fun getBranchStatus(@Path("id") outletId: String): Response<BranchStatusResponse>
+    
+    @GET("api/teleshop-manager/check-device-config/{deviceId}")
+    suspend fun checkDeviceConfig(@Path("deviceId") deviceId: String): Response<DeviceConfigResponse>
 }

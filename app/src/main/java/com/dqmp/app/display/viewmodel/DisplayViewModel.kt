@@ -57,6 +57,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private val client = OkHttpClient.Builder().build()
     
     private var activeBaseUrl: String = SettingsRepository.DEFAULT_URL
+    private var configCheckCounter: Int = 0 // Check config every 6th poll (60 seconds)
     
     private var lastSuccessfulData: Triple<DisplayData, List<CounterStatus>, BranchStatusResponse>? = null
     private var lastSuccessTime: Long = 0
@@ -103,11 +104,44 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private fun startPolling(outletId: String) {
         pollingJob = viewModelScope.launch {
             while (isActive) {
+                // Check device configuration every 6th poll (approximately every 60 seconds)
+                configCheckCounter++
+                if (configCheckCounter >= 6) {
+                    configCheckCounter = 0
+                    if (!checkDeviceConfiguration()) {
+                        // Device is no longer configured - return to setup
+                        Log.w("DQMP_VM", "Device configuration removed - returning to setup")
+                        _state.value = DisplayState.Setup
+                        break
+                    }
+                }
+                
                 fetchData(outletId)
                 // Intelligent polling: Poll less frequently if Websocket is active, 
                 // but poll immediately on errors.
                 delay(if (webSocket != null) 30000 else 10000) 
             }
+        }
+    }
+
+    private suspend fun checkDeviceConfiguration(): Boolean {
+        return try {
+            val service = apiService ?: return true // Default to true if no service
+            val deviceId = repository.deviceId.first()
+            
+            if (deviceId.isEmpty()) return true // No device ID stored
+            
+            val response = service.checkDeviceConfig(deviceId)
+            if (response.isSuccessful) {
+                val configResponse = response.body()
+                configResponse?.isConfigured ?: false
+            } else {
+                Log.w("DQMP_VM", "Config check failed: ${response.code()}")
+                true // Default to true on API errors to avoid false positives
+            }
+        } catch (e: Exception) {
+            Log.w("DQMP_VM", "Config check error: ${e.message}")
+            true // Default to true on errors
         }
     }
 

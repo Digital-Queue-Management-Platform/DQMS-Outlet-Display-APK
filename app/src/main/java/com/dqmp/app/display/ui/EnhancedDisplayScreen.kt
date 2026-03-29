@@ -275,7 +275,7 @@ fun EnhancedHeader(
             // Stats Mini Cards
             Row(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 StatCard("Waiting", totalWaiting.toString(), Emerald600)
@@ -314,25 +314,35 @@ fun EnhancedHeader(
 
 @Composable
 fun StatCard(label: String, value: String, color: Color) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(2.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Text(
-            text = label.uppercase(),
-            color = Slate400,
-            fontSize = 8.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            text = value,
-            color = color,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Black,
-            textAlign = TextAlign.Center
-        )
+        Column(
+            modifier = Modifier.padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = label.uppercase(),
+                color = Slate400,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = value,
+                color = color,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
@@ -403,9 +413,10 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(-2.dp)
             ) {
-                // Grouped content with logos close to text
+                // Logo row with left and right alignment, centered text
                 Row(
-                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Left: SLT Logo
@@ -415,8 +426,6 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                         modifier = Modifier.height(32.dp).padding(vertical = 2.dp)
                     )
                     
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
                     // Center: Platform Title
                     Text(
                         text = "Digital Queue Management Platform",
@@ -425,8 +434,6 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
                     
                     // Right: Transzent Logo
                     Image(

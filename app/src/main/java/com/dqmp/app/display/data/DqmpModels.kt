@@ -103,3 +103,22 @@ data class DisplayMetrics(
     val totalUpdates: Int = 0,
     val averageResponseTime: Int = 0
 )
+
+// Device configuration check response
+@Serializable
+data class DeviceConfigResponse(
+    val isConfigured: Boolean,
+    val outletId: String? = null,
+    val outletName: String? = null,
+    val baseUrl: String? = null,
+    val device: DeviceInfo? = null
+)
+
+@Serializable
+data class DeviceInfo(
+    val deviceId: String,
+    val deviceName: String,
+    val configuredAt: String,
+    val isActive: Boolean,
+    val lastSeen: String?
+)
