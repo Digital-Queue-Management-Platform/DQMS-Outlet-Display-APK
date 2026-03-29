@@ -115,12 +115,12 @@ fun EnhancedDisplayScreen(
             // Main Content Grid
             Row(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Left Column: Now Serving and Up Next
                 Column(
                     modifier = Modifier.weight(if ((settings?.counters == true) || (settings?.recent == true)) 3f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Now Serving Section
                     NowServingSection(
@@ -143,7 +143,7 @@ fun EnhancedDisplayScreen(
                 if ((settings?.counters == true) || (settings?.recent == true)) {
                     Column(
                         modifier = Modifier.weight(2f),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         // Counter Status Panel
                         if (settings.counters == true) {
@@ -166,7 +166,7 @@ fun EnhancedDisplayScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Enhanced Footer
             EnhancedFooter(
@@ -323,13 +323,15 @@ fun StatCard(label: String, value: String, color: Color) {
             color = Slate400,
             fontSize = 8.sp,
             fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center
         )
         Text(
             text = value,
             color = color,
             fontSize = 20.sp,
-            fontWeight = FontWeight.Black
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -390,44 +392,56 @@ fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.8f))
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            // Brand Logos
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.logo),
-                    contentDescription = "SLT-Mobitel Logo",
-                    modifier = Modifier.height(28.dp)
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(24.dp)
-                        .background(Slate200)
-                )
-                Image(
-                    painter = painterResource(id = R.drawable.transzent_logo),
-                    contentDescription = "Transzent Logo",
-                    modifier = Modifier.height(32.dp)
-                )
-            }
-
-            // System Info
+            
+            // Bottom Row: Centered Text with Logos and Status
             Column(
-                horizontalAlignment = Alignment.End
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(-2.dp)
             ) {
+                // Logo row with left and right alignment, centered text
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left: SLT Logo (increased size)
+                    Image(
+                        painter = painterResource(id = R.drawable.logo),
+                        contentDescription = "SLT-Mobitel Logo",
+                        modifier = Modifier.height(32.dp).padding(vertical = 2.dp)
+                    )
+                    
+                    // Center: Platform Title
+                    Text(
+                        text = "Digital Queue Management Platform",
+                        color = Slate800,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    // Right: Transzent Logo (increased size)
+                    Image(
+                        painter = painterResource(id = R.drawable.transzent_logo),
+                        contentDescription = "Transzent Logo",
+                        modifier = Modifier.height(36.dp).padding(vertical = 2.dp)
+                    )
+                }
+                
+                // Centered Copyright Text
                 Text(
-                    text = "Digital Queue Management Platform",
-                    color = Slate800,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "© 2026 SLT-Mobitel Digital Platforms Section",
+                    color = Slate500,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center
                 )
+                
+                // Status Row (centered)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically

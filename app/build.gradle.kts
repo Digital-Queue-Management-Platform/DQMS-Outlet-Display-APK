@@ -49,7 +49,7 @@ android {
     applicationVariants.all {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "DQMP_Professional_Outlet_Display_V1.0.apk"
+            output.outputFileName = "DQMP_Outlet_Display_V1.0.apk"
         }
     }
 }
