@@ -51,6 +51,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     val showSettings: StateFlow<Boolean> = _showSettings
 
     private var pollingJob: Job? = null
+    private var setupPollingJob: Job? = null
     private var webSocket: WebSocket? = null
     private var apiService: DqmpApiService? = null
     private val json = Json { ignoreUnknownKeys = true }
@@ -77,6 +78,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
             }.collect { (id, url) ->
                 if (id.isNullOrBlank()) {
                     _state.value = DisplayState.Setup
+                    stopAll()
+                    setupApi(url)
+                    startSetupPolling() // Start polling for configuration while in setup
                 } else {
                     initialize(id, url)
                 }
@@ -142,6 +146,47 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         } catch (e: Exception) {
             Log.w("DQMP_VM", "Config check error: ${e.message}")
             true // Default to true on errors
+        }
+    }
+
+    private fun startSetupPolling() {
+        setupPollingJob?.cancel()
+        setupPollingJob = viewModelScope.launch {
+            while (isActive && _state.value is DisplayState.Setup) {
+                try {
+                    val deviceId = repository.deviceId.first()
+                    if (deviceId.isNotEmpty()) {
+                        val service = apiService
+                        if (service != null) {
+                            val response = service.checkDeviceConfig(deviceId)
+                            if (response.isSuccessful) {
+                                val configResponse = response.body()
+                                if (configResponse?.isConfigured == true) {
+                                    // Device has been configured! Save settings and switch to display
+                                    val outletId = configResponse.outletId ?: ""
+                                    val baseUrl = configResponse.baseUrl ?: activeBaseUrl
+                                    
+                                    Log.i("DQMP_VM", "Device configured for outlet: ${configResponse.outletName}")
+                                    repository.saveSettings(outletId, baseUrl, deviceId)
+                                    
+                                    // The settings change will trigger the state transition automatically
+                                    break
+                                } else {
+                                    Log.d("DQMP_VM", "Device not yet configured, continuing to poll...")
+                                }
+                            } else {
+                                Log.w("DQMP_VM", "Setup config check failed: ${response.code()}")
+                            }
+                        }
+                    } else {
+                        Log.d("DQMP_VM", "No device ID available for setup polling")
+                    }
+                } catch (e: Exception) {
+                    Log.w("DQMP_VM", "Setup polling error: ${e.message}")
+                }
+                
+                delay(5000) // Check every 5 seconds during setup
+            }
         }
     }
 
@@ -300,6 +345,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
 
     fun stopAll() {
         pollingJob?.cancel()
+        setupPollingJob?.cancel()
         webSocket?.close(1000, "Clean switch")
         webSocket = null
     }
