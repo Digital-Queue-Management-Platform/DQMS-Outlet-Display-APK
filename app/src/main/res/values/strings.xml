@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App Name -->
+    <string name="app_name">DQMP Outlet Display</string>
+    
+    <!-- Display Labels -->
+    <string name="outlet_queue_display">Outlet Queue Display</string>
+    <string name="customer_queue_information">Customer queue information</string>
+    <string name="now_serving">Now Serving</string>
+    <string name="up_next">Up Next</string>
+    <string name="recently_called">Recently Called</string>
+    <string name="counters">Counters</string>
+    <string name="waiting">Waiting</string>
+    <string name="serving">Serving</string>
+    
+    <!-- Status Messages -->
+    <string name="no_tokens_in_service">No token is currently in service.</string>
+    <string name="no_waiting_tokens">No waiting tokens right now.</string>
+    <string name="no_recent_calls">No recent calls yet.</string>
+    <string name="loading_display">Loading outlet queue display...</string>
+    
+    <!-- Counter Information -->
+    <string name="counter_number">Counter #%1$d</string>
+    <string name="staff_station">Staff Station</string>
+    <string name="queue_position">Queue #%1$d</string>
+    
+    <!-- Announcement Patterns -->
+    <string name="announcement_token_called">%1$s. Token number %2$d, please proceed to counter number %3$d.</string>
+    <string name="announcement_token_recalled">%1$s. Token number %2$d is being recalled. Please proceed to counter number %3$d immediately.</string>
+    <string name="announcement_test">This is a speaker test announcement.</string>
+    
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="settings_title">Display Settings</string>
+    <string name="back">Back</string>
+    <string name="connection_settings">Connection Settings</string>
+    <string name="display_settings">Display Settings</string>
+    <string name="audio_settings">Audio Settings</string>
+    <string name="server_url">Server URL</string>
+    <string name="outlet_id">Outlet ID</string>
+    <string name="language">Language</string>
+    <string name="theme">Theme</string>
+    <string name="show_queue_numbers">Show Queue Numbers</string>
+    <string name="enable_announcements">Enable Voice Announcements</string>
+    <string name="volume">Volume</string>
+    <string name="test_announcement">Test Announcement</string>
+    <string name="refresh_interval">Refresh Interval</string>
+    <string name="auto_slide">Auto Slide</string>
+    <string name="play_tone">Play Tone</string>
+    <string name="content_scale">Content Scale</string>
+    <string name="show_services">Show Services</string>
+    <string name="show_counters">Show Counters</string>
+    <string name="show_recent">Show Recent Calls</string>
+    <string name="voice_announcements">Voice Announcements</string>
+
+    <!-- Configuration Screen -->
+    <string name="configuration_required">Configuration Required</string>
+    <string name="scan_qr_code">Scan QR Code to Configure</string>
+    <string name="qr_code_description">QR code for device configuration</string>
+    <string name="device_id">Device ID: %1$s</string>
+    <string name="configuration_instructions">Configuration Instructions</string>
+    <string name="instruction_step_1">Open DQMP Teleshop Manager on your mobile device</string>
+    <string name="instruction_step_2">Navigate to Outlet Display Configuration</string>
+    <string name="instruction_step_3">Scan this QR code to configure the display</string>
+    <string name="waiting_for_configuration">Waiting for configuration…</string>
+    <string name="connecting_to_manager">Connecting to manager…</string>
+    <string name="configuration_error">Configuration failed. Please try again.</string>
+    <string name="ready_to_scan">Ready to scan QR code</string>
+    <string name="configuring_device">Configuring Device</string>
+    <string name="please_wait">Please wait while we set up your outlet display</string>
+    <string name="configuration_success">Configuration successful!</string>
+    <string name="configuration_reset">Reset Configuration</string>
+    <string name="confirm_reset">Are you sure you want to reset the configuration?</string>
+    <string name="reset_confirmation">This will return to the QR code configuration screen</string>
+    <string name="reset">Reset</string>
+    <string name="cancel">Cancel</string>
+    <string name="configuration_management">Configuration Management</string>
+    <string name="current_configuration">Current Configuration</string>
+    <string name="outlet_name_label">Outlet: %1$s</string>
+    <string name="outlet_id_label">ID: %1$s</string>
+
+    <!-- Display Status -->
+    <string name="outlet_display_title">Outlet Display</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_error">Connection Error</string>
+    <string name="proceed_to_counter">Please proceed to %1$s</string>
+    <string name="queue_waiting">Queue - Waiting</string>
+    <string name="no_queue_items">No customers in queue</string>
+    <string name="status_waiting">Waiting</string>
+    <string name="powered_by_dqmp">Powered by DQMP</string>
+    <string name="connecting_to_server">Connecting to server…</string>
+    <string name="reconnecting">Reconnecting…</string>
+    
+    <!-- Error Messages -->
+    <string name="connection_error">Connection error - auto-reconnect will attempt recovery</string>
+    <string name="failed_to_load">Failed to load outlet display</string>
+    <string name="audio_playback_blocked">Audio playback blocked - please enable audio permissions</string>
+    
+    <!-- Time Formats -->
+    <string name="time_format">HH:mm:ss</string>
+    <string name="date_format">EEEE, d MMMM yyyy</string>
+</resources>
