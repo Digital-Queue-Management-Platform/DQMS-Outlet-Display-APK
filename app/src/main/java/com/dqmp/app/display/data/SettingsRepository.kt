@@ -17,32 +17,49 @@ class SettingsRepository(private val context: Context) {
     companion object {
         val KEY_OUTLET_ID = stringPreferencesKey("outlet_id")
         val KEY_BASE_URL = stringPreferencesKey("base_url")
+        val KEY_DEVICE_ID = stringPreferencesKey("device_id")
         val DEFAULT_URL = "https://sltsecmanage.slt.lk:7443/"
     }
 
     val outletId: Flow<String?> = context.dataStore.data.map { it[KEY_OUTLET_ID] }
     val baseUrl: Flow<String> = context.dataStore.data.map { it[KEY_BASE_URL] ?: DEFAULT_URL }
+    val deviceId: Flow<String> = context.dataStore.data.map { it[KEY_DEVICE_ID] ?: "" }
 
     /**
      * Helper to get current settings synchronously on a background thread for non-Compose contexts.
      */
-    suspend fun getSettingsSnapshot(): Pair<String?, String> {
+    suspend fun getSettingsSnapshot(): Triple<String?, String, String> {
         val prefs = context.dataStore.data.first()
-        return Pair(prefs[KEY_OUTLET_ID], prefs[KEY_BASE_URL] ?: DEFAULT_URL)
+        return Triple(prefs[KEY_OUTLET_ID], prefs[KEY_BASE_URL] ?: DEFAULT_URL, prefs[KEY_DEVICE_ID] ?: "")
     }
 
-    suspend fun saveSettings(id: String, url: String) {
+    suspend fun saveSettings(id: String, url: String, deviceId: String = "") {
         // Validation: Ensure URL ends with / for Retrofit
         val sanitizedUrl = if (url.endsWith("/")) url else "$url/"
         context.dataStore.edit {
             it[KEY_OUTLET_ID] = id.trim()
             it[KEY_BASE_URL] = sanitizedUrl.trim()
+            if (deviceId.isNotEmpty()) {
+                it[KEY_DEVICE_ID] = deviceId.trim()
+            }
         }
     }
 
     suspend fun clearAll() {
         context.dataStore.edit {
             it.clear()
+        }
+    }
+    
+    suspend fun clearDeviceId() {
+        context.dataStore.edit {
+            it.remove(KEY_DEVICE_ID)
+        }
+    }
+    
+    suspend fun clearOutletId() {
+        context.dataStore.edit {
+            it.remove(KEY_OUTLET_ID)
         }
     }
 }

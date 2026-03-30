@@ -49,7 +49,7 @@ android {
     applicationVariants.all {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "DQMP_Outlet_Display.apk"
+            output.outputFileName = "DQMP_Outlet_Display_V1.0.apk"
         }
     }
 }
@@ -68,6 +68,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     
     // Compose for TV
     implementation("androidx.tv:tv-foundation:1.0.0-alpha07")
@@ -90,6 +91,23 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // QR Code Generation and Scanning
+    implementation("com.google.zxing:core:3.5.2")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    
+    // Security & Encryption
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    
+    // Audio & Media
+    implementation("androidx.media3:media3-exoplayer:1.1.1")
+    implementation("androidx.media3:media3-ui:1.1.1")
+    
+    // Work Manager for background tasks
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
+    
+    // Lottie for professional animations
+    implementation("com.airbnb.android:lottie-compose:6.1.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

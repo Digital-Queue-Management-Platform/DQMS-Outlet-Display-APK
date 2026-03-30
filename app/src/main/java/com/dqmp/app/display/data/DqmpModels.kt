@@ -25,7 +25,9 @@ data class Token(
 
 @Serializable
 data class Customer(
-    val name: String? = null
+    val name: String? = null,
+    val preferredLanguage: String? = null,
+    val preferredLanguages: List<String> = emptyList()
 )
 
 @Serializable
@@ -33,7 +35,9 @@ data class CalledRecord(
     val id: String,
     val tokenNumber: Int,
     val counterNumber: Int? = null,
-    val serviceTypes: List<String> = emptyList()
+    val serviceTypes: List<String> = emptyList(),
+    val calledAt: String? = null,
+    val customer: Customer? = null
 )
 
 @Serializable
@@ -63,8 +67,10 @@ data class CounterStatus(
 
 @Serializable
 data class Officer(
+    val id: String? = null,
     val name: String,
-    val status: String // "available", "serving", "on_break"
+    val status: String, // "available", "serving", "on_break", "offline"
+    val services: List<String> = emptyList()
 )
 
 @Serializable
@@ -78,4 +84,41 @@ data class BranchStatusResponse(
 data class Notice(
     val title: String,
     val message: String = ""
+)
+
+// Service type information for displaying badges and categories
+@Serializable
+data class ServiceTypeInfo(
+    val code: String,
+    val name: String,
+    val category: String? = null,
+    val color: String? = null
+)
+
+// Enhanced display metrics for monitoring
+@Serializable
+data class DisplayMetrics(
+    val connectionStatus: String = "online", // "online", "offline", "reconnecting"
+    val lastFetchTime: Long = 0L,
+    val totalUpdates: Int = 0,
+    val averageResponseTime: Int = 0
+)
+
+// Device configuration check response
+@Serializable
+data class DeviceConfigResponse(
+    val isConfigured: Boolean,
+    val outletId: String? = null,
+    val outletName: String? = null,
+    val baseUrl: String? = null,
+    val device: DeviceInfo? = null
+)
+
+@Serializable
+data class DeviceInfo(
+    val deviceId: String,
+    val deviceName: String,
+    val configuredAt: String,
+    val isActive: Boolean,
+    val lastSeen: String?
 )
