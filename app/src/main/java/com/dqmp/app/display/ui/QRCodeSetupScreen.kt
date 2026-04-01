@@ -499,7 +499,9 @@ data class DeviceConfiguration(
 private suspend fun checkDeviceConfiguration(deviceId: String): DeviceConfiguration? {
     return withContext(Dispatchers.IO) {
         try {
-            val url = URL("http://10.191.253.58:3001/api/teleshop-manager/check-device-config/$deviceId")
+            // Production URL - matches SettingsRepository.DEFAULT_URL
+            val baseUrl = "https://sltsecmanage.slt.lk:7443"
+            val url = URL("$baseUrl/api/teleshop-manager/check-device-config/$deviceId")
             val connection = url.openConnection() as HttpURLConnection
             
             connection.requestMethod = "GET"
@@ -529,6 +531,7 @@ private suspend fun checkDeviceConfiguration(deviceId: String): DeviceConfigurat
                 null
             }
         } catch (e: Exception) {
+            android.util.Log.e("QRSetup", "Config check failed: ${e.message}")
             null
         }
     }
