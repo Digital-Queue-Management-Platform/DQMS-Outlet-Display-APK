@@ -726,7 +726,7 @@ data class TokenData(
 )
 
 // Data classes for HTTP polling
-@Serializable
+@Serializable 
 data class AudioEventResponse(
     val id: String,
     val outletId: String,
