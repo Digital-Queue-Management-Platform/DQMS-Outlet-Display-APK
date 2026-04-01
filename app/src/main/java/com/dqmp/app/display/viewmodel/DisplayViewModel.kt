@@ -598,7 +598,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     delay(pollInterval)
                     
                     val service = apiService ?: continue
-                    val sinceTime = java.time.Instant.ofEpochMilli(lastAudioEventCheck).toString()
+                    val sinceTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }.format(java.util.Date(lastAudioEventCheck))
                     
                     Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime")
                     val response = service.getAudioEvents(outletId, sinceTime)
