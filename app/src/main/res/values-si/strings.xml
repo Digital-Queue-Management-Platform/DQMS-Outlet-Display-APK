@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App Name -->
+    <string name="app_name">DQMP අලෙවිසැල් ප්‍රදර්ශනය</string>
+    
+    <!-- Display Labels -->
+    <string name="outlet_queue_display">අලෙවිසැල් පෝලිම් ප්‍රදර්ශනය</string>
+    <string name="customer_queue_information">පාරිභෝගික පෝලිම් තොරතුරු</string>
+    <string name="now_serving">දැන් සේවය කරනු ලබනවා</string>
+    <string name="up_next">ඊළඟට</string>
+    <string name="recently_called">මෑතකදී කැඳවූ</string>
+    <string name="counters">කවුන්ටර්</string>
+    <string name="waiting">බලා සිටිනවා</string>
+    <string name="serving">සේවය කරනවා</string>
+    
+    <!-- Status Messages -->
+    <string name="no_tokens_in_service">දැනට කිසිදු ටෝකනයක් සේවයේ නැත.</string>
+    <string name="no_waiting_tokens">දැන් බලා සිටින ටෝකන් නැත.</string>
+    <string name="no_recent_calls">තවම මෑත ඇමතුම් නැත.</string>
+    <string name="loading_display">අලෙවිසැල් පෝලිම් ප්‍රදර්ශනය පූරණය වෙමින්...</string>
+    
+    <!-- Counter Information -->
+    <string name="counter_number">කවුන්ටරය #%1$d</string>
+    <string name="staff_station">කාර්ය මණ්ඩල ස්ථානය</string>
+    <string name="queue_position">පෝලිම #%1$d</string>
+    
+    <!-- Announcement Patterns -->
+    <string name="announcement_token_called">%1$s. ටෝකන් අංක %2$d, කරුණාකර කවුන්ටර අංක %3$d වෙත පැමිණෙන්න.</string>
+    <string name="announcement_token_recalled">%1$s. ටෝකන් අංක %2$d නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටරය %3$d වෙත පැමිණෙන්න.</string>
+    <string name="announcement_test">මෙය ශබ්ද පරීක්ෂණ නිවේදනයකි.</string>
+    
+    <!-- Settings -->
+    <string name="settings">සැකසුම්</string>
+    <string name="settings_title">සංදර්ශන සැකසුම්</string>
+    <string name="back">ආපසු</string>
+    <string name="connection_settings">සම්බන්ධතා සැකසුම්</string>
+    <string name="display_settings">ප්‍රදර්ශන සැකසුම්</string>
+    <string name="audio_settings">ශ්‍රව්‍ය සැකසුම්</string>
+    <string name="server_url">සේවාදායක URL</string>
+    <string name="outlet_id">අලෙවිසැල් හැඳුනුම්කාරකය</string>
+    <string name="language">භාෂාව</string>
+    <string name="theme">තේමාව</string>
+    <string name="show_queue_numbers">පෝලිම් අංක පෙන්වන්න</string>
+    <string name="enable_announcements">කටහඬ නිවේදන සක්‍රීය කරන්න</string>
+    <string name="volume">ශබ්දය</string>
+    <string name="test_announcement">පරීක්ෂණ නිවේදනය</string>
+    <string name="refresh_interval">නැවුම් කිරීමේ කාල අන්තරය</string>
+    <string name="auto_slide">ස්වයං ස්ලයිඩ්</string>
+    <string name="play_tone">ශබ්දය වාදනය කරන්න</string>
+    <string name="content_scale">අන්තර්ගත පරිමාණය</string>
+    <string name="show_services">සේවා පෙන්වන්න</string>
+    <string name="show_counters">කවුන්ටර් පෙන්වන්න</string>
+    <string name="show_recent">මෑත ඇමතුම් පෙන්වන්න</string>
+    <string name="voice_announcements">හඬ නිවේදන</string>
+
+    <!-- Configuration Screen -->
+    <string name="configuration_required">වින්‍යාසය අවශ්‍යය</string>
+    <string name="scan_qr_code">වින්‍යාස කිරීමට QR කේතය ස්කෑන් කරන්න</string>
+    <string name="qr_code_description">උපාංග වින්‍යාසය සඳහා QR කේතය</string>
+    <string name="device_id">උපාංග හැඳුනුම්කාරකය: %1$s</string>
+    <string name="configuration_instructions">වින්‍යාස උපදෙස්</string>
+    <string name="instruction_step_1">ඔබේ ජංගම උපාංගයේ DQMP Teleshop Manager විවෘත කරන්න</string>
+    <string name="instruction_step_2">අලෙවිසැල් සංදර්ශන වින්‍යාසය වෙත යන්න</string>
+    <string name="instruction_step_3">සංදර්ශනය වින්‍යාස කිරීමට මෙම QR කේතය ස්කෑන් කරන්න</string>
+    <string name="waiting_for_configuration">වින්‍යාසය සඳහා රැඳී සිටිමින්…</string>
+    <string name="connecting_to_manager">කළමනාකරු වෙත සම්බන්ධ වෙමින්…</string>
+    <string name="configuration_error">වින්‍යාසය අසාර්ථකයි. කරුණාකර නැවත උත්සාහ කරන්න.</string>
+    <string name="ready_to_scan">QR කේතය ස්කෑන් කිරීමට සූදානම්</string>
+    <string name="configuring_device">උපාංගය වින්‍යාස කරමින්</string>
+    <string name="please_wait">ඔබේ අලෙවිසැල් සංදර්ශනය සකසන අතරතුර කරුණාකර රැඳී සිටින්න</string>
+    <string name="configuration_success">වින්‍යාසය සාර්ථකයි!</string>
+    <string name="configuration_reset">වින්‍යාසය නැවත සකසන්න</string>
+    <string name="confirm_reset">ඔබට වින්‍යාසය නැවත සැකසීමට අවශ්‍ය බව විශ්වාසද?</string>
+    <string name="reset_confirmation">මෙය QR කේත වින්‍යාස තිරයට නැවත හරවයි</string>
+    <string name="reset">නැවත සකසන්න</string>
+    <string name="cancel">අවලංගු කරන්න</string>
+    <string name="configuration_management">වින්‍යාස කළමනාකරණය</string>
+    <string name="current_configuration">වත්මන් වින්‍යාසය</string>
+    <string name="outlet_name_label">අලෙවිසැල: %1$s</string>
+    <string name="outlet_id_label">හැඳුනුම්කාරකය: %1$s</string>
+
+    <!-- Display Status -->
+    <string name="outlet_display_title">අලෙවිසැල් සංදර්ශනය</string>
+    <string name="status_connected">සම්බන්ධයි</string>
+    <string name="status_connecting">සම්බන්ධ වෙමින්</string>
+    <string name="status_disconnected">විසම්බන්ධයි</string>
+    <string name="status_error">සම්බන්ධතා දෝෂය</string>
+    <string name="proceed_to_counter">කරුණාකර %1$s වෙත යන්න</string>
+    <string name="queue_waiting">පෝලිම - රැඳී සිටිමින්</string>
+    <string name="no_queue_items">පෝලිමේ ගනුදේනුකරුවන් නොමැත</string>
+    <string name="status_waiting">රැඳී සිටිමින්</string>
+    <string name="powered_by_dqmp">DQMP මගින් බලගන්වයි</string>
+    <string name="connecting_to_server">සේවාදායකයට සම්බන්ධ වෙමින්…</string>
+    <string name="reconnecting">නැවත සම්බන්ධ වෙමින්…</string>
+    
+    <!-- Error Messages -->
+    <string name="connection_error">සම්බන්ධතා දෝෂය - ස්වයං-නැවත සම්බන්ධ වීම අත්හදා බැලීම</string>
+    <string name="failed_to_load">අලෙවිසැල් ප්‍රදර්ශනය පූරණය කිරීමට අසමත් විය</string>
+    <string name="audio_playback_blocked">ශ්‍රව්‍ය වාදනය අවහිර කර ඇත - කරුණාකර ශ්‍රව්‍ය අවසර සක්‍රිය කරන්න</string>
+    
+    <!-- Time Formats -->
+    <string name="time_format">HH:mm:ss</string>
+    <string name="date_format">EEEE, d MMMM yyyy</string>
+</resources>

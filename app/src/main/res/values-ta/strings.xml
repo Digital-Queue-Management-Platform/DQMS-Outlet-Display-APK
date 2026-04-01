@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App Name -->
+    <string name="app_name">DQMP விற்பனை நிலையம் காட்சி</string>
+    
+    <!-- Display Labels -->
+    <string name="outlet_queue_display">விற்பனை நிலைய வரிசை காட்சி</string>
+    <string name="customer_queue_information">வாடிக்கையாளர் வரிசை தகவல்</string>
+    <string name="now_serving">இப்போது சேவை</string>
+    <string name="up_next">அடுத்தது</string>
+    <string name="recently_called">சமீபத்தில் அழைக்கப்பட்டது</string>
+    <string name="counters">கவுண்டர்கள்</string>
+    <string name="waiting">காத்திருக்கிறது</string>
+    <string name="serving">சேவை செய்கிறது</string>
+    
+    <!-- Status Messages -->
+    <string name="no_tokens_in_service">தற்போது எந்த டோக்கனும் சேவையில் இல்லை.</string>
+    <string name="no_waiting_tokens">இப்போது காத்திருக்கும் டோக்கன்கள் இல்லை.</string>
+    <string name="no_recent_calls">இன்னும் சமீபத்திய அழைப்புகள் இல்லை.</string>
+    <string name="loading_display">விற்பனை நிலையம் வரிசை காட்சி ஏற்றுகிறது...</string>
+    
+    <!-- Counter Information -->
+    <string name="counter_number">கவுண்டர் #%1$d</string>
+    <string name="staff_station">ஊழியர் நிலையம்</string>
+    <string name="queue_position">வரிசை #%1$d</string>
+    
+    <!-- Announcement Patterns -->
+    <string name="announcement_token_called">%1$s. அடையாள எண் %2$d, தயவுசெய்து கவுண்டர் எண் %3$d க்கு செல்லவும்.</string>
+    <string name="announcement_token_recalled">%1$s. அடையாள எண் %2$d மீண்டும் அழைக்கப்படுகிறது. உடனடியாக கவுண்டர் %3$d க்கு வரவும்.</string>
+    <string name="announcement_test">இது ஒலிபெருக்கி சோதனை அறிவிப்பு.</string>
+    
+    <!-- Settings -->
+    <string name="settings">அமைப்புகள்</string>
+    <string name="settings_title">காட்சி அமைப்புகள்</string>
+    <string name="back">பின்செல்</string>
+    <string name="connection_settings">இணைப்பு அமைப்புகள்</string>
+    <string name="display_settings">காட்சி அமைப்புகள்</string>
+    <string name="audio_settings">ஆடியோ அமைப்புகள்</string>
+    <string name="server_url">சர்வர் URL</string>
+    <string name="outlet_id">விற்பனை நிலைய ஐடி</string>
+    <string name="language">மொழி</string>
+    <string name="theme">தீம்</string>
+    <string name="show_queue_numbers">வரிசை எண்களைக் காட்டு</string>
+    <string name="enable_announcements">குரல் அறிவிப்புகளை இயக்கு</string>
+    <string name="volume">ஒலி அளவு</string>
+    <string name="test_announcement">சோதனை அறிவிப்பு</string>
+    <string name="refresh_interval">புதுப்பிப்பு இடைவெளி</string>
+    <string name="auto_slide">தானியங்கு ஸ்லைடு</string>
+    <string name="play_tone">டோன் இசைக்க</string>
+    <string name="content_scale">உள்ளடக்க அளவு</string>
+    <string name="show_services">சேவைகளைக் காட்டு</string>
+    <string name="show_counters">கவுண்டர்களைக் காட்டு</string>
+    <string name="show_recent">சமீபத்திய அழைப்புகளைக் காட்டு</string>
+    <string name="voice_announcements">குரல் அறிவிப்புகள்</string>
+
+    <!-- Configuration Screen -->
+    <string name="configuration_required">உள்ளமைவு தேவை</string>
+    <string name="scan_qr_code">உள்ளமைக்க QR குறியீடு ஸ்கேன் செய்யவும்</string>
+    <string name="qr_code_description">சாதன உள்ளமைவுக்கான QR குறியீடு</string>
+    <string name="device_id">சாதன ஐடி: %1$s</string>
+    <string name="configuration_instructions">உள்ளமைவு வழிமுறைகள்</string>
+    <string name="instruction_step_1">உங்கள் மொபைல் சாதனத்தில் DQMP Teleshop Manager ஐ திறக்கவும்</string>
+    <string name="instruction_step_2">விற்பனை நிலைய காட்சி உள்ளமைவுக்கு செல்லவும்</string>
+    <string name="instruction_step_3">காட்சியை உள்ளமைக்க இந்த QR குறியீட்டை ஸ்கேன் செய்யவும்</string>
+    <string name="waiting_for_configuration">உள்ளமைவுக்காக காத்திருக்கிறது…</string>
+    <string name="connecting_to_manager">மேலாளருடன் இணைக்கிறது…</string>
+    <string name="configuration_error">உள்ளமைவு தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.</string>
+    <string name="ready_to_scan">QR குறியீட்டை ஸ்கேன் செய்ய தயார்</string>
+    <string name="configuring_device">சாதனத்தை உள்ளமைக்கிறது</string>
+    <string name="please_wait">உங்கள் விற்பனை நிலைய காட்சியை அமைக்கும்போது தயவுசெய்து காத்திருக்கவும்</string>
+    <string name="configuration_success">உள்ளமைவு வெற்றிகரமானது!</string>
+    <string name="configuration_reset">உள்ளமைவை மீட்டமை</string>
+    <string name="confirm_reset">நீங்கள் உள்ளமைவை மீட்டமைக்க விரும்புகிறீர்களா?</string>
+    <string name="reset_confirmation">இது QR குறியீடு உள்ளமைவு திரைக்கு திரும்பும்</string>
+    <string name="reset">மீட்டமை</string>
+    <string name="cancel">ரத்து</string>
+    <string name="configuration_management">உள்ளமைவு மேலாண்மை</string>
+    <string name="current_configuration">தற்போதைய உள்ளமைவு</string>
+    <string name="outlet_name_label">விற்பனை நிலையம்: %1$s</string>
+    <string name="outlet_id_label">ஐடி: %1$s</string>
+
+    <!-- Display Status -->
+    <string name="outlet_display_title">விற்பனை நிலைய காட்சி</string>
+    <string name="status_connected">இணைக்கப்பட்டுள்ளது</string>
+    <string name="status_connecting">இணைக்கிறது</string>
+    <string name="status_disconnected">துண்டிக்கப்பட்டுள்ளது</string>
+    <string name="status_error">இணைப்பு பிழை</string>
+    <string name="proceed_to_counter">தயவுசெய்து %1$s க்கு செல்லவும்</string>
+    <string name="queue_waiting">வரிசை - காத்திருக்கிறது</string>
+    <string name="no_queue_items">வரிசையில் வாடிக்கையாளர்கள் இல்லை</string>
+    <string name="status_waiting">காத்திருக்கிறது</string>
+    <string name="powered_by_dqmp">DQMP ஆல் இயக்கப்படுகிறது</string>
+    <string name="connecting_to_server">சர்வருடன் இணைக்கிறது…</string>
+    <string name="reconnecting">மீண்டும் இணைக்கிறது…</string>
+    
+    <!-- Error Messages -->
+    <string name="connection_error">இணைப்பு பிழை - தானியங்கு மீண்டும் இணைக்கும் முயற்சி</string>
+    <string name="failed_to_load">விற்பனை நிலைய காட்சியை ஏற்றுவதில் தோல்வி</string>
+    <string name="audio_playback_blocked">ஆடியோ பிளேபேக் தடுக்கப்பட்டது - தயவுசெய்து ஆடியோ அனுமதிகளை இயக்கவும்</string>
+    
+    <!-- Time Formats -->
+    <string name="time_format">HH:mm:ss</string>
+    <string name="date_format">EEEE, d MMMM yyyy</string>
+</resources>
