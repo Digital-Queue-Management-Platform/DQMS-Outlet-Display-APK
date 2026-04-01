@@ -50,18 +50,25 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     
     private val _showSettings = MutableStateFlow(false)
     val showSettings: StateFlow<Boolean> = _showSettings
+    
+    // WebSocket connection status for UI indicator
+    private val _isWebSocketConnected = MutableStateFlow(false)
+    val isWebSocketConnected: StateFlow<Boolean> = _isWebSocketConnected.asStateFlow()
 
     private var pollingJob: Job? = null
     private var setupPollingJob: Job? = null
     private var webSocket: WebSocket? = null
+    private var wsHeartbeatJob: Job? = null
     private var apiService: DqmpApiService? = null
     private val json = Json { ignoreUnknownKeys = true }
     
-    // Optimized HTTP client for faster loading
+    // Optimized HTTP client with WebSocket keep-alive for better connection stability
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)  // Faster connection timeout
-        .readTimeout(10, TimeUnit.SECONDS)     // Faster read timeout
+        .readTimeout(30, TimeUnit.SECONDS)     // Longer read timeout for WS
         .writeTimeout(10, TimeUnit.SECONDS)    // Faster write timeout
+        .pingInterval(25, TimeUnit.SECONDS)    // Send ping every 25 seconds to keep WS alive
+        .retryOnConnectionFailure(true)        // Auto-retry on connection failure
         .build()
     
     private var activeBaseUrl: String = SettingsRepository.DEFAULT_URL
@@ -216,20 +223,46 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
 
     private fun startWebSocket(outletId: String, baseUrl: String) {
         webSocket?.close(1000, "Normal reset")
+        wsHeartbeatJob?.cancel()
         
         try {
             val uri = Uri.parse(baseUrl)
             val wsScheme = if (uri.scheme == "https") "wss" else "ws"
             val wsUrl = uri.buildUpon().scheme(wsScheme).build().toString()
 
+            Log.d("DQMP_WS", "Connecting to WebSocket: $wsUrl")
             val request = Request.Builder().url(wsUrl).build()
             webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    Log.d("DQMP_WS", "WebSocket connected successfully")
+                    _isWebSocketConnected.value = true
+                    
+                    // Start heartbeat job to send periodic pings
+                    wsHeartbeatJob = viewModelScope.launch {
+                        while (isActive) {
+                            delay(30000) // Send heartbeat every 30 seconds
+                            try {
+                                webSocket.send("{\"type\":\"heartbeat\"}")
+                                Log.d("DQMP_WS", "Heartbeat sent")
+                            } catch (e: Exception) {
+                                Log.w("DQMP_WS", "Heartbeat failed: ${e.message}")
+                            }
+                        }
+                    }
+                }
+                
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try {
                         val msg = json.parseToJsonElement(text).jsonObject
                         val type = msg["type"]?.jsonPrimitive?.content
                         val data = msg["data"]?.jsonObject
                         val incomingId = data?.get("outletId")?.jsonPrimitive?.content
+                        
+                        // Ignore heartbeat acknowledgements
+                        if (type == "heartbeat" || type == "pong") {
+                            Log.d("DQMP_WS", "Heartbeat acknowledged")
+                            return
+                        }
                         
                         if (incomingId == null || incomingId == outletId) {
                             // Handle device removal events - immediate logout
@@ -318,8 +351,33 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         }
                     } catch (e: Exception) { Log.e("DQMP_WS", "Parse error", e) }
                 }
+                
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.w("DQMP_WS", "WebSocket closing: $code - $reason")
+                    _isWebSocketConnected.value = false
+                    wsHeartbeatJob?.cancel()
+                }
+                
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.w("DQMP_WS", "WebSocket closed: $code - $reason")
+                    _isWebSocketConnected.value = false
+                    wsHeartbeatJob?.cancel()
+                    this@DisplayViewModel.webSocket = null
+                    
+                    // Auto-reconnect after normal closure (not device removal)
+                    if (code != 1000) {
+                        viewModelScope.launch {
+                            delay(3000)
+                            Log.d("DQMP_WS", "Attempting to reconnect after closure...")
+                            startWebSocket(outletId, baseUrl)
+                        }
+                    }
+                }
+                
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.w("DQMP_WS", "WS Failure: ${t.message}. Checking device config and retrying in 3s.")
+                    _isWebSocketConnected.value = false
+                    wsHeartbeatJob?.cancel()
                     this@DisplayViewModel.webSocket = null
                     
                     // Immediate configuration check when WebSocket fails (could indicate device removal)
@@ -432,8 +490,10 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     fun stopAll() {
         pollingJob?.cancel()
         setupPollingJob?.cancel()
+        wsHeartbeatJob?.cancel()
         webSocket?.close(1000, "Clean switch")
         webSocket = null
+        _isWebSocketConnected.value = false
     }
 
     fun resetApp() {
