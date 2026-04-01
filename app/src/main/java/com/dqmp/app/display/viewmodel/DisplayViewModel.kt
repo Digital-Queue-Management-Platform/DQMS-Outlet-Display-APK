@@ -12,6 +12,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -55,6 +56,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private val _isWebSocketConnected = MutableStateFlow(false)
     val isWebSocketConnected: StateFlow<Boolean> = _isWebSocketConnected.asStateFlow()
 
+    // Real-time display manager for production WebSocket integration
+    private var realTimeManager: RealTimeDisplayManager? = null
+
     private var pollingJob: Job? = null
     private var setupPollingJob: Job? = null
     private var webSocket: WebSocket? = null
@@ -84,6 +88,14 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private var lastAnnouncedTokenId: String? = null
     private var lastAnnouncedCounter: Int? = null
 
+    // Simplified production-stable approach
+    // HTTP polling ONLY (no WebSocket complexity)
+    private var audioPollingJob: Job? = null
+    private var lastAudioEventCheck = System.currentTimeMillis()
+    private var audioEventsEnabled = true
+    private var isPollingActive = false
+    private var burstModeUntil = 0L // Burst polling for faster response after events
+
     init {
         viewModelScope.launch {
             // Re-activate app when settings change
@@ -107,14 +119,15 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         stopAll()
         setupApi(baseUrl)
         
-        // Immediate data fetch for faster loading (don't wait for polling interval)
+        // Immediate data fetch for faster loading
         viewModelScope.launch {
             Log.d("DQMP_PERF", "Starting immediate data fetch for faster loading")
             fetchData(outletId)
         }
         
         startPolling(outletId)
-        startWebSocket(outletId, baseUrl)
+        // PRODUCTION RELIABLE: Use HTTP polling ONLY for audio events (no WebSocket complexity)
+        startAudioEventPolling(outletId, baseUrl)
     }
 
     private fun setupApi(baseUrl: String) {
@@ -232,9 +245,10 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                 val wsScheme = if (uri.scheme == "https") "wss" else "ws"
                 
                 // Construct proper WebSocket URL with query parameters for registration
-                // Backend expects: ws://server/?outletId=xxx&deviceId=yyy
+                // Backend expects: ws://server/ws?outletId=xxx&deviceId=yyy
                 val wsUrlBuilder = uri.buildUpon()
                     .scheme(wsScheme)
+                    .path("/ws")
                     .appendQueryParameter("outletId", outletId)
                 
                 if (deviceId.isNotEmpty()) {
@@ -249,6 +263,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         Log.d("DQMP_WS", "WebSocket connected successfully")
                         _isWebSocketConnected.value = true
+                        
+                        // Stop HTTP polling when WebSocket is working
+                        stopAudioEventPolling()
                         
                         // Start heartbeat job to send periodic pings
                         wsHeartbeatJob = viewModelScope.launch {
@@ -378,6 +395,11 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         wsHeartbeatJob?.cancel()
                         this@DisplayViewModel.webSocket = null
                         
+                        // Start HTTP polling as fallback during disconnection
+                        if (code != 1000) {
+                            startAudioEventPolling(outletId, baseUrl)
+                        }
+                        
                         // Auto-reconnect after abnormal closure
                         if (code != 1000) {
                             viewModelScope.launch {
@@ -389,10 +411,13 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     }
                     
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        Log.w("DQMP_WS", "WS Failure: ${t.message}. Checking device config and retrying in 3s.")
+                        Log.w("DQMP_WS", "WS Failure: ${t.message}. Starting HTTP polling fallback...")
                         _isWebSocketConnected.value = false
                         wsHeartbeatJob?.cancel()
                         this@DisplayViewModel.webSocket = null
+                        
+                        // Start HTTP polling as fallback
+                        startAudioEventPolling(outletId, baseUrl)
                         
                         viewModelScope.launch { 
                             if (!checkDeviceConfiguration()) {
@@ -506,10 +531,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     fun stopAll() {
         pollingJob?.cancel()
         setupPollingJob?.cancel()
-        wsHeartbeatJob?.cancel()
-        webSocket?.close(1000, "Clean switch")
-        webSocket = null
-        _isWebSocketConnected.value = false
+        stopAudioEventPolling() // Stop HTTP polling
+        // Removed WebSocket complexity for production stability
+        Log.i("DQMP_VM", "🛑 All services stopped (production stable mode)")
     }
 
     fun resetApp() {
@@ -545,4 +569,181 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     fun hideSettings() {
         _showSettings.value = false
     }
+
+    /**
+     * PRODUCTION RELIABLE: HTTP-only audio event polling
+     * Simplified approach for maximum stability in teleshop environment
+     */
+    private fun startAudioEventPolling(outletId: String, baseUrl: String) {
+        audioPollingJob?.cancel()
+        
+        if (!audioEventsEnabled || isPollingActive) {
+            Log.d("DQMP_POLL", "Audio polling already active or disabled")
+            return
+        }
+        
+        isPollingActive = true
+        Log.i("DQMP_POLL", "🎵 PRODUCTION STABLE: Starting HTTP audio polling for outlet: $outletId")
+        
+        audioPollingJob = viewModelScope.launch {
+            while (isActive && audioEventsEnabled && isPollingActive) {
+                try {
+                    // Adaptive polling: 100ms in burst mode, 300ms normally
+                    val currentTime = System.currentTimeMillis()
+                    val pollInterval = if (currentTime < burstModeUntil) {
+                        100L // SUPER FAST during burst mode (after events)
+                    } else {
+                        300L // Normal fast mode
+                    }
+                    
+                    delay(pollInterval)
+                    
+                    val service = apiService ?: continue
+                    val sinceTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }.format(java.util.Date(lastAudioEventCheck))
+                    
+                    Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime")
+                    val response = service.getAudioEvents(outletId, sinceTime)
+                    
+                    if (response.isSuccessful) {
+                        val result = response.body()
+                        if (result?.success == true && !result.events.isNullOrEmpty()) {
+                            Log.i("DQMP_POLL", "🔊 FOUND ${result.events.size} AUDIO EVENTS - PROCESSING NOW!")
+                            
+                            // Enable burst mode for next 3 seconds after finding events
+                            burstModeUntil = System.currentTimeMillis() + 3000
+                            Log.i("DQMP_POLL", "⚡ BURST MODE ACTIVATED for 3 seconds - 100ms polling!")
+                            
+                            for (event in result.events) {
+                                Log.i("DQMP_POLL", "🎯 Processing event: ${event.type} | testType: ${event.testType} | lang: ${event.lang}")
+                                processAudioEventReliable(event)
+                            }
+                            
+                            // Acknowledge processed events
+                            val eventIds = result.events.map { it.id }
+                            try {
+                                service.acknowledgeAudioEvents(outletId, mapOf("eventIds" to eventIds))
+                                Log.i("DQMP_POLL", "✅ Events acknowledged: ${eventIds.size}")
+                            } catch (e: Exception) {
+                                Log.w("DQMP_POLL", "Failed to ack events: ${e.message}")
+                            }
+                        } else {
+                            Log.d("DQMP_POLL", "No new audio events")
+                        }
+                        
+                        // Update last check time
+                        lastAudioEventCheck = System.currentTimeMillis()
+                    } else {
+                        Log.w("DQMP_POLL", "Audio polling failed: ${response.code()} - ${response.message()}")
+                    }
+                    
+                } catch (e: Exception) {
+                    Log.e("DQMP_POLL", "Audio polling error: ${e.message}", e)
+                    delay(3000) // Wait longer on error
+                }
+            }
+            Log.i("DQMP_POLL", "🛑 Audio polling loop ended")
+            isPollingActive = false
+        }
+    }
+    
+    /**
+     * PRODUCTION RELIABLE: Process audio event with extensive logging
+     */
+    private suspend fun processAudioEventReliable(event: AudioEventResponse) {
+        try {
+            Log.i("DQMP_AUDIO", "🎵 ==========AUDIO EVENT PROCESSING==========")
+            Log.i("DQMP_AUDIO", "📝 Event ID: ${event.id}")
+            Log.i("DQMP_AUDIO", "📝 Event Type: ${event.type}")
+            Log.i("DQMP_AUDIO", "📝 Test Type: ${event.testType}")
+            Log.i("DQMP_AUDIO", "📝 Language: ${event.lang}")
+            Log.i("DQMP_AUDIO", "📝 Custom Text: ${event.customText}")
+            Log.i("DQMP_AUDIO", "📝 Chime Volume: ${event.chimeVolume}")
+            Log.i("DQMP_AUDIO", "📝 Voice Volume: ${event.voiceVolume}")
+            
+            when (event.type) {
+                "TEST_SOUND" -> {
+                    val announcement = TokenCallEvent(
+                        tokenNumber = "000",
+                        counterNumber = 0,
+                        customerName = "",
+                        preferredLanguage = event.lang ?: "en",
+                        eventType = event.testType ?: "chime",
+                        customText = event.customText
+                    )
+                    
+                    Log.i("DQMP_AUDIO", "🔊 EMITTING TEST_SOUND EVENT - Type: ${announcement.eventType}")
+                    _announcementEvent.emit(announcement)
+                    Log.i("DQMP_AUDIO", "✅ TEST_SOUND EVENT EMITTED SUCCESSFULLY!")
+                }
+                "TOKEN_CALLED" -> {
+                    Log.i("DQMP_AUDIO", "📢 TOKEN_CALLED event received - Processing...")
+                    
+                    // Parse token data from the event
+                    val tokenNumber = event.tokenData?.tokenNumber ?: "000"
+                    val counterNumber = event.tokenData?.counterNumber ?: 0
+                    val customerName = event.tokenData?.customerName ?: ""
+                    
+                    val announcement = TokenCallEvent(
+                        tokenNumber = tokenNumber,
+                        counterNumber = counterNumber,
+                        customerName = customerName,
+                        preferredLanguage = event.lang ?: "en",
+                        eventType = "call", // This will trigger chime + voice
+                        customText = null
+                    )
+                    
+                    Log.i("DQMP_AUDIO", "🔊 EMITTING TOKEN_CALLED EVENT - Customer: $customerName, Token: $tokenNumber, Counter: $counterNumber")
+                    _announcementEvent.emit(announcement)
+                    Log.i("DQMP_AUDIO", "✅ TOKEN_CALLED EVENT EMITTED SUCCESSFULLY!")
+                }
+                else -> {
+                    Log.w("DQMP_AUDIO", "❓ Unknown event type: ${event.type}")
+                }
+            }
+            Log.i("DQMP_AUDIO", "🎵 =======END AUDIO EVENT PROCESSING=======")
+        } catch (e: Exception) {
+            Log.e("DQMP_AUDIO", "❌ CRITICAL: Failed to process audio event: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Stop audio polling
+     */
+    private fun stopAudioEventPolling() {
+        audioPollingJob?.cancel()
+        audioPollingJob = null
+        Log.i("DQMP_POLL", "🛑 Stopped HTTP audio polling")
+    }
 }
+
+@Serializable
+data class TokenData(
+    val tokenNumber: String = "",
+    val counterNumber: Int = 0,
+    val customerName: String = ""
+)
+
+// Data classes for HTTP polling
+@Serializable 
+data class AudioEventResponse(
+    val id: String,
+    val outletId: String,
+    val type: String,
+    val testType: String? = null,
+    val lang: String? = null,
+    val customText: String? = null,
+    val chimeVolume: Int? = null,
+    val voiceVolume: Int? = null,
+    val timestamp: String,
+    val tokenData: TokenData? = null
+)
+
+@Serializable
+data class AudioEventsResult(
+    val success: Boolean,
+    val events: List<AudioEventResponse>?,
+    val serverTime: String?,
+    val count: Int?
+)

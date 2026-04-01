@@ -29,6 +29,7 @@ import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import com.dqmp.app.display.data.DeviceManager
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -44,7 +45,7 @@ import java.util.*
  * manual outlet ID entry and provides professional one-touch setup.
  */
 
-data class DeviceInfo(
+data class SetupDeviceInfo(
     val deviceId: String,
     val deviceName: String,
     val macAddress: String,
@@ -62,35 +63,33 @@ fun QRCodeSetupScreen(
     var isChecking by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("Waiting for setup...") }
     
+    // Device manager for configuration polling
+    val deviceManager = remember { DeviceManager(context) }
+    
     // Generate fresh device info every time, with refresh capability
     val deviceInfo = remember(refreshKey) { generateDeviceInfo(context) }
     val qrBitmap = remember(refreshKey) { generateQRCode(deviceInfo) }
     
-    // Poll for configuration completion every 5 seconds
+    // Poll for configuration completion using DeviceManager
     LaunchedEffect(deviceInfo.deviceId) {
-        while (true) {
-            if (!isChecking) {
-                isChecking = true
-                statusMessage = "Checking configuration..."
-                
-                try {
-                    // Check if this device has been configured by polling the backend
-                    val config = checkDeviceConfiguration(deviceInfo.deviceId)
-                    if (config != null) {
-                        statusMessage = "Configuration found! Connecting..."
-                        delay(1000)
-                        onConfigurationReceived(config.outletId, config.baseUrl)
-                        return@LaunchedEffect
-                    }
-                } catch (e: Exception) {
-                    // Configuration not found yet, continue polling
-                }
-                
-                statusMessage = "Waiting for setup..."
+        isChecking = true
+        statusMessage = "Connecting to backend..."
+        
+        // Start polling with proper error handling
+        deviceManager.pollForConfiguration(
+            deviceId = deviceInfo.deviceId,
+            onConfigurationFound = { outletId, baseUrl ->
+                statusMessage = "Configuration complete! Connecting..."
+                onConfigurationReceived(outletId, baseUrl)
+            },
+            onError = { error ->
+                statusMessage = "Connection error: $error"
                 isChecking = false
             }
-            delay(5000) // Poll every 5 seconds
-        }
+        )
+        
+        statusMessage = "Scanning for configuration..."
+        isChecking = true
     }
 
     Surface(
@@ -399,7 +398,7 @@ private fun InstructionStep(
     }
 }
 
-private fun generateDeviceInfo(context: android.content.Context): DeviceInfo {
+private fun generateDeviceInfo(context: android.content.Context): SetupDeviceInfo {
     // Get or create a persistent device identifier
     val sharedPrefs = context.getSharedPreferences("dqmp_device", Context.MODE_PRIVATE)
     var deviceId = sharedPrefs.getString("device_id", null)
@@ -442,7 +441,7 @@ private fun generateDeviceInfo(context: android.content.Context): DeviceInfo {
     val setupCode = generateSetupCode()
     val timestamp = System.currentTimeMillis()
     
-    return DeviceInfo(deviceId!!, deviceName, macAddress, setupCode, timestamp)
+    return SetupDeviceInfo(deviceId!!, deviceName, macAddress, setupCode, timestamp)
 }
 
 private fun generateSetupCode(): String {
@@ -454,7 +453,7 @@ private fun generateSetupCode(): String {
         .joinToString("-")
 }
 
-private fun generateQRCode(deviceInfo: DeviceInfo): Bitmap? {
+private fun generateQRCode(deviceInfo: SetupDeviceInfo): Bitmap? {
     return try {
         val qrCodeContent = """
             {
@@ -485,57 +484,5 @@ private fun generateQRCode(deviceInfo: DeviceInfo): Bitmap? {
         null
     } catch (e: Exception) {
         null
-    }
-}
-
-// Data class for device configuration response
-data class DeviceConfiguration(
-    val outletId: String,
-    val baseUrl: String,
-    val isConfigured: Boolean
-)
-
-// Check if device has been configured by polling backend
-private suspend fun checkDeviceConfiguration(deviceId: String): DeviceConfiguration? {
-    return withContext(Dispatchers.IO) {
-        try {
-            // Production URL - matches SettingsRepository.DEFAULT_URL
-            // IMPORTANT: Always use this URL, ignore baseUrl from server response
-            val productionUrl = "https://sltsecmanage.slt.lk:7443"
-            val url = URL("$productionUrl/api/teleshop-manager/check-device-config/$deviceId")
-            val connection = url.openConnection() as HttpURLConnection
-            
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            
-            val responseCode = connection.responseCode
-            if (responseCode == 200) {
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val response = reader.readText()
-                reader.close()
-                
-                val jsonResponse = JSONObject(response)
-                val isConfigured = jsonResponse.getBoolean("isConfigured")
-                
-                if (isConfigured) {
-                    DeviceConfiguration(
-                        outletId = jsonResponse.getString("outletId"),
-                        // Use the production URL we know works, not the one from server
-                        // Server might return localhost/internal IP which doesn't work for APK
-                        baseUrl = productionUrl,
-                        isConfigured = true
-                    )
-                } else {
-                    null
-                }
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("QRSetup", "Config check failed: ${e.message}")
-            null
-        }
     }
 }
