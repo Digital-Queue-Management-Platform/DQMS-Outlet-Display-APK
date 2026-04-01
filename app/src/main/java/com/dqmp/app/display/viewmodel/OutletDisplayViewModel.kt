@@ -46,7 +46,8 @@ class OutletDisplayViewModel(application: Application) : AndroidViewModel(applic
         // Initialize WebSocket client
         webSocketClient = WebSocketClient(
             baseUrl = settings.serverUrl,
-            audioManager = audioManager
+            audioManager = audioManager,
+            coroutineScope = viewModelScope
         )
         
         // Observe WebSocket events

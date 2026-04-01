@@ -13,7 +13,9 @@ data class TokenCall(
     val tokenNumber: String,
     val counterId: String,
     val counterName: String,
-    val timestamp: String
+    val timestamp: String,
+    val customerName: String = "",
+    val language: String = "en"
 )
 
 data class DisplaySettings(
