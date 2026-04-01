@@ -12,6 +12,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -680,9 +681,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     Log.i("DQMP_AUDIO", "📢 TOKEN_CALLED event received - Processing...")
                     
                     // Parse token data from the event
-                    val tokenNumber = event.tokenData?.get("tokenNumber")?.toString() ?: "000"
-                    val counterNumber = event.tokenData?.get("counterNumber")?.toString()?.toIntOrNull() ?: 0
-                    val customerName = event.tokenData?.get("customerName")?.toString() ?: ""
+                    val tokenNumber = event.tokenData?.tokenNumber ?: "000"
+                    val counterNumber = event.tokenData?.counterNumber ?: 0
+                    val customerName = event.tokenData?.customerName ?: ""
                     
                     val announcement = TokenCallEvent(
                         tokenNumber = tokenNumber,
@@ -717,20 +718,29 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     }
 }
 
+@Serializable
+data class TokenData(
+    val tokenNumber: String = "",
+    val counterNumber: Int = 0,
+    val customerName: String = ""
+)
+
 // Data classes for HTTP polling
+@Serializable
 data class AudioEventResponse(
     val id: String,
     val outletId: String,
     val type: String,
-    val testType: String?,
-    val lang: String?,
-    val customText: String?,
-    val chimeVolume: Int?,
-    val voiceVolume: Int?,
+    val testType: String? = null,
+    val lang: String? = null,
+    val customText: String? = null,
+    val chimeVolume: Int? = null,
+    val voiceVolume: Int? = null,
     val timestamp: String,
-    val tokenData: Map<String, Any>? = null
+    val tokenData: TokenData? = null
 )
 
+@Serializable
 data class AudioEventsResult(
     val success: Boolean,
     val events: List<AudioEventResponse>?,
