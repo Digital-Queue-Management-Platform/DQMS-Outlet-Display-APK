@@ -500,8 +500,9 @@ private suspend fun checkDeviceConfiguration(deviceId: String): DeviceConfigurat
     return withContext(Dispatchers.IO) {
         try {
             // Production URL - matches SettingsRepository.DEFAULT_URL
-            val baseUrl = "https://sltsecmanage.slt.lk:7443"
-            val url = URL("$baseUrl/api/teleshop-manager/check-device-config/$deviceId")
+            // IMPORTANT: Always use this URL, ignore baseUrl from server response
+            val productionUrl = "https://sltsecmanage.slt.lk:7443"
+            val url = URL("$productionUrl/api/teleshop-manager/check-device-config/$deviceId")
             val connection = url.openConnection() as HttpURLConnection
             
             connection.requestMethod = "GET"
@@ -521,7 +522,9 @@ private suspend fun checkDeviceConfiguration(deviceId: String): DeviceConfigurat
                 if (isConfigured) {
                     DeviceConfiguration(
                         outletId = jsonResponse.getString("outletId"),
-                        baseUrl = jsonResponse.getString("baseUrl"),
+                        // Use the production URL we know works, not the one from server
+                        // Server might return localhost/internal IP which doesn't work for APK
+                        baseUrl = productionUrl,
                         isConfigured = true
                     )
                 } else {

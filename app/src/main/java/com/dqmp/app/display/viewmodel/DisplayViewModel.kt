@@ -225,174 +225,190 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         webSocket?.close(1000, "Normal reset")
         wsHeartbeatJob?.cancel()
         
-        try {
-            val uri = Uri.parse(baseUrl)
-            val wsScheme = if (uri.scheme == "https") "wss" else "ws"
-            val wsUrl = uri.buildUpon().scheme(wsScheme).build().toString()
+        viewModelScope.launch {
+            try {
+                val deviceId = repository.deviceId.first()
+                val uri = Uri.parse(baseUrl)
+                val wsScheme = if (uri.scheme == "https") "wss" else "ws"
+                
+                // Construct proper WebSocket URL with query parameters for registration
+                // Backend expects: ws://server/?outletId=xxx&deviceId=yyy
+                val wsUrlBuilder = uri.buildUpon()
+                    .scheme(wsScheme)
+                    .appendQueryParameter("outletId", outletId)
+                
+                if (deviceId.isNotEmpty()) {
+                    wsUrlBuilder.appendQueryParameter("deviceId", deviceId)
+                }
+                
+                val wsUrl = wsUrlBuilder.build().toString()
 
-            Log.d("DQMP_WS", "Connecting to WebSocket: $wsUrl")
-            val request = Request.Builder().url(wsUrl).build()
-            webSocket = client.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.d("DQMP_WS", "WebSocket connected successfully")
-                    _isWebSocketConnected.value = true
-                    
-                    // Start heartbeat job to send periodic pings
-                    wsHeartbeatJob = viewModelScope.launch {
-                        while (isActive) {
-                            delay(30000) // Send heartbeat every 30 seconds
-                            try {
-                                webSocket.send("{\"type\":\"heartbeat\"}")
-                                Log.d("DQMP_WS", "Heartbeat sent")
-                            } catch (e: Exception) {
-                                Log.w("DQMP_WS", "Heartbeat failed: ${e.message}")
+                Log.d("DQMP_WS", "Connecting to WebSocket: $wsUrl")
+                val request = Request.Builder().url(wsUrl).build()
+                webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        Log.d("DQMP_WS", "WebSocket connected successfully")
+                        _isWebSocketConnected.value = true
+                        
+                        // Start heartbeat job to send periodic pings
+                        wsHeartbeatJob = viewModelScope.launch {
+                            while (isActive) {
+                                delay(30000) // Send heartbeat every 30 seconds
+                                try {
+                                    webSocket.send("{\"type\":\"heartbeat\"}")
+                                    Log.d("DQMP_WS", "Heartbeat sent")
+                                } catch (e: Exception) {
+                                    Log.w("DQMP_WS", "Heartbeat failed: ${e.message}")
+                                }
                             }
                         }
                     }
-                }
-                
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    try {
-                        val msg = json.parseToJsonElement(text).jsonObject
-                        val type = msg["type"]?.jsonPrimitive?.content
-                        val data = msg["data"]?.jsonObject
-                        val incomingId = data?.get("outletId")?.jsonPrimitive?.content
-                        
-                        // Ignore heartbeat acknowledgements
-                        if (type == "heartbeat" || type == "pong") {
-                            Log.d("DQMP_WS", "Heartbeat acknowledged")
-                            return
-                        }
-                        
-                        if (incomingId == null || incomingId == outletId) {
-                            // Handle device removal events - immediate logout
-                            if (type == "DEVICE_REMOVED") {
-                                val removedDeviceId = data?.get("deviceId")?.jsonPrimitive?.content
-                                Log.w("DQMP_WS", "Device removal event received for deviceId: $removedDeviceId")
-                                
-                                viewModelScope.launch {
-                                    val currentDeviceId = repository.deviceId.first()
-                                    if (removedDeviceId == currentDeviceId) {
-                                        Log.w("DQMP_VM", "This device was removed - immediately returning to setup")
-                                        
-                                        // Clear ALL device configuration immediately
-                                        repository.clearDeviceId()
-                                        repository.clearOutletId() 
-                                        
-                                        // Stop all connections immediately and return to setup
-                                        stopAll()
-                                        _state.value = DisplayState.Setup
-                                        
-                                        // Audio feedback for device removal
-                                        _announcementEvent.emit(
-                                            TokenCallEvent(
-                                                tokenNumber = "Device Removed",
-                                                counterNumber = null,
-                                                customerName = null,
-                                                eventType = "CONFIG_SUCCESS", // Plays ding sound
-                                                customText = "This device has been removed from the outlet display system"
-                                            )
-                                        )
-                                    }
-                                }
-                                return@onMessage // Don't process other events
+                    
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        try {
+                            val msg = json.parseToJsonElement(text).jsonObject
+                            val type = msg["type"]?.jsonPrimitive?.content
+                            val data = msg["data"]?.jsonObject
+                            val incomingId = data?.get("outletId")?.jsonPrimitive?.content
+                            
+                            // Ignore heartbeat acknowledgements
+                            if (type == "heartbeat" || type == "pong") {
+                                Log.d("DQMP_WS", "Heartbeat acknowledged")
+                                return
                             }
                             
-                            if (type in listOf("TOKEN_CALLED", "TOKEN_RECALLED", "RECALL", "CALL", "TEST_SOUND")) {
-                                Log.d("DQMP_WS", "Update event received: $type. Fetching...")
-                                
-                                // Proactive Announcement from WS (Calls and Recalls)
-                                if (type == "TOKEN_CALLED" || type == "TOKEN_RECALLED" || type == "TEST_SOUND" || type == "RECALL") {
-                                    val tokenNum = data?.get("tokenNumber")?.jsonPrimitive?.content 
-                                        ?: data?.get("token_number")?.jsonPrimitive?.content ?: ""
-                                    val counterNum = data?.get("counterNumber")?.jsonPrimitive?.content?.toIntOrNull()
-                                        ?: data?.get("counter_number")?.jsonPrimitive?.content?.toIntOrNull()
-                                    val name = data?.get("customer")?.jsonObject?.get("name")?.jsonPrimitive?.content
-                                        ?: data?.get("customer_name")?.jsonPrimitive?.content
-                                        ?: data?.get("name")?.jsonPrimitive?.content 
-                                    
-                                    val langJson = data?.get("preferredLanguages")
-                                    val lang = when {
-                                        type == "TEST_SOUND" -> data?.get("lang")?.jsonPrimitive?.content ?: "en"
-                                        langJson is JsonArray && langJson.isNotEmpty() -> langJson[0].jsonPrimitive.content
-                                        langJson is JsonPrimitive -> langJson.content
-                                        else -> data?.get("preferred_language")?.jsonPrimitive?.content ?: "en"
-                                    }
-                                    
-                                    val eventType = if (type == "TEST_SOUND") {
-                                        val testType = data?.get("testType")?.jsonPrimitive?.content ?: "voice"
-                                        when (testType) {
-                                            "chime" -> "TEST_CHIME"
-                                            "voice" -> "TEST_VOICE"
-                                            else -> "TEST_VOICE"
-                                        }
-                                    } else if (type.contains("RECALL") || type == "RECALL") "RECALL" 
-                                    else "CALL"
-                                    
-                                    Log.d("DQMP_AUDIO", "Emitting $eventType event for token #$tokenNum")
+                            if (incomingId == null || incomingId == outletId) {
+                                // Handle device removal events - immediate logout
+                                if (type == "DEVICE_REMOVED") {
+                                    val removedDeviceId = data?.get("deviceId")?.jsonPrimitive?.content
+                                    Log.w("DQMP_WS", "Device removal event received for deviceId: $removedDeviceId")
                                     
                                     viewModelScope.launch {
-                                        _announcementEvent.emit(
-                                            TokenCallEvent(
-                                                tokenNumber = tokenNum,
-                                                counterNumber = counterNum,
-                                                customerName = name,
-                                                preferredLanguage = lang,
-                                                eventType = eventType,
-                                                customText = data?.get("customText")?.jsonPrimitive?.content
-                                                    ?: data?.get("text")?.jsonPrimitive?.content
+                                        val currentDeviceId = repository.deviceId.first()
+                                        if (removedDeviceId == currentDeviceId) {
+                                            Log.w("DQMP_VM", "This device was removed - immediately returning to setup")
+                                            
+                                            // Clear ALL device configuration immediately
+                                            repository.clearDeviceId()
+                                            repository.clearOutletId() 
+                                            
+                                            // Stop all connections immediately and return to setup
+                                            stopAll()
+                                            _state.value = DisplayState.Setup
+                                            
+                                            // Audio feedback for device removal
+                                            _announcementEvent.emit(
+                                                TokenCallEvent(
+                                                    tokenNumber = "Device Removed",
+                                                    counterNumber = null,
+                                                    customerName = null,
+                                                    eventType = "CONFIG_SUCCESS",
+                                                    customText = "This device has been removed from the outlet display system"
+                                                )
                                             )
-                                        )
+                                        }
                                     }
+                                    return@onMessage
                                 }
                                 
-                                viewModelScope.launch { fetchData(outletId) }
+                                if (type in listOf("TOKEN_CALLED", "TOKEN_RECALLED", "RECALL", "CALL", "TEST_SOUND")) {
+                                    Log.d("DQMP_WS", "Update event received: $type. Fetching...")
+                                    
+                                    if (type == "TOKEN_CALLED" || type == "TOKEN_RECALLED" || type == "TEST_SOUND" || type == "RECALL") {
+                                        val tokenNum = data?.get("tokenNumber")?.jsonPrimitive?.content 
+                                            ?: data?.get("token_number")?.jsonPrimitive?.content ?: ""
+                                        val counterNum = data?.get("counterNumber")?.jsonPrimitive?.content?.toIntOrNull()
+                                            ?: data?.get("counter_number")?.jsonPrimitive?.content?.toIntOrNull()
+                                        val name = data?.get("customer")?.jsonObject?.get("name")?.jsonPrimitive?.content
+                                            ?: data?.get("customer_name")?.jsonPrimitive?.content
+                                            ?: data?.get("name")?.jsonPrimitive?.content 
+                                        
+                                        val langJson = data?.get("preferredLanguages")
+                                        val lang = when {
+                                            type == "TEST_SOUND" -> data?.get("lang")?.jsonPrimitive?.content ?: "en"
+                                            langJson is JsonArray && langJson.isNotEmpty() -> langJson[0].jsonPrimitive.content
+                                            langJson is JsonPrimitive -> langJson.content
+                                            else -> data?.get("preferred_language")?.jsonPrimitive?.content ?: "en"
+                                        }
+                                        
+                                        val eventType = if (type == "TEST_SOUND") {
+                                            val testType = data?.get("testType")?.jsonPrimitive?.content ?: "voice"
+                                            when (testType) {
+                                                "chime" -> "TEST_CHIME"
+                                                "voice" -> "TEST_VOICE"
+                                                else -> "TEST_VOICE"
+                                            }
+                                        } else if (type.contains("RECALL") || type == "RECALL") "RECALL" 
+                                        else "CALL"
+                                        
+                                        Log.d("DQMP_AUDIO", "Emitting $eventType event for token #$tokenNum")
+                                        
+                                        viewModelScope.launch {
+                                            _announcementEvent.emit(
+                                                TokenCallEvent(
+                                                    tokenNumber = tokenNum,
+                                                    counterNumber = counterNum,
+                                                    customerName = name,
+                                                    preferredLanguage = lang,
+                                                    eventType = eventType,
+                                                    customText = data?.get("customText")?.jsonPrimitive?.content
+                                                        ?: data?.get("text")?.jsonPrimitive?.content
+                                                )
+                                            )
+                                        }
+                                    }
+                                    
+                                    viewModelScope.launch { fetchData(outletId) }
+                                }
+                            }
+                        } catch (e: Exception) { 
+                            Log.e("DQMP_WS", "Parse error", e) 
+                        }
+                    }
+                    
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                        Log.w("DQMP_WS", "WebSocket closing: $code - $reason")
+                        _isWebSocketConnected.value = false
+                        wsHeartbeatJob?.cancel()
+                    }
+                    
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        Log.w("DQMP_WS", "WebSocket closed: $code - $reason")
+                        _isWebSocketConnected.value = false
+                        wsHeartbeatJob?.cancel()
+                        this@DisplayViewModel.webSocket = null
+                        
+                        // Auto-reconnect after abnormal closure
+                        if (code != 1000) {
+                            viewModelScope.launch {
+                                delay(3000)
+                                Log.d("DQMP_WS", "Attempting to reconnect after closure...")
+                                startWebSocket(outletId, baseUrl)
                             }
                         }
-                    } catch (e: Exception) { Log.e("DQMP_WS", "Parse error", e) }
-                }
-                
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.w("DQMP_WS", "WebSocket closing: $code - $reason")
-                    _isWebSocketConnected.value = false
-                    wsHeartbeatJob?.cancel()
-                }
-                
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.w("DQMP_WS", "WebSocket closed: $code - $reason")
-                    _isWebSocketConnected.value = false
-                    wsHeartbeatJob?.cancel()
-                    this@DisplayViewModel.webSocket = null
+                    }
                     
-                    // Auto-reconnect after normal closure (not device removal)
-                    if (code != 1000) {
-                        viewModelScope.launch {
-                            delay(3000)
-                            Log.d("DQMP_WS", "Attempting to reconnect after closure...")
-                            startWebSocket(outletId, baseUrl)
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        Log.w("DQMP_WS", "WS Failure: ${t.message}. Checking device config and retrying in 3s.")
+                        _isWebSocketConnected.value = false
+                        wsHeartbeatJob?.cancel()
+                        this@DisplayViewModel.webSocket = null
+                        
+                        viewModelScope.launch { 
+                            if (!checkDeviceConfiguration()) {
+                                Log.w("DQMP_VM", "Device removed - WebSocket failure triggered config check")
+                                _state.value = DisplayState.Setup
+                                return@launch
+                            }
+                            delay(3000) 
+                            startWebSocket(outletId, baseUrl) 
                         }
                     }
-                }
-                
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.w("DQMP_WS", "WS Failure: ${t.message}. Checking device config and retrying in 3s.")
-                    _isWebSocketConnected.value = false
-                    wsHeartbeatJob?.cancel()
-                    this@DisplayViewModel.webSocket = null
-                    
-                    // Immediate configuration check when WebSocket fails (could indicate device removal)
-                    viewModelScope.launch { 
-                        if (!checkDeviceConfiguration()) {
-                            Log.w("DQMP_VM", "Device removed - WebSocket failure triggered config check")
-                            _state.value = DisplayState.Setup
-                            return@launch
-                        }
-                        delay(3000) 
-                        startWebSocket(outletId, baseUrl) 
-                    }
-                }
-            })
-        } catch (e: Exception) { Log.e("DQMP_WS", "Failed to construct WS URL", e) }
+                })
+            } catch (e: Exception) { 
+                Log.e("DQMP_WS", "Failed to construct WS URL", e) 
+            }
+        }
     }
 
     private suspend fun fetchData(outletId: String) {
