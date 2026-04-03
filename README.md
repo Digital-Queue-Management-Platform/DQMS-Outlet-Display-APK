@@ -4,21 +4,21 @@
 
 **DQMP Outlet Display** is a professional-grade Android TV application designed for retail environments. This app provides a comprehensive queue management display system with complete feature parity to the web dashboard, professional audio announcements, and enterprise-level configuration management.
 
-## ✨ Professional Features
+## Professional Features
 
-### 🎯 One-Touch QR Code Setup
+### One-Touch QR Code Setup
 - **Zero Manual Configuration**: Scan QR code from teleshop manager dashboard
 - **Instant Deployment**: Configure outlet ID and settings in seconds
 - **Permanent Storage**: Configuration persists across reboots and updates
 - **Secure Encryption**: All settings stored with enterprise-grade encryption
 
-### 🚀 Auto-Start & Kiosk Mode
+### Auto-Start & Kiosk Mode
 - **Boot Integration**: Automatically launches when Android TV device starts
 - **Kiosk Lock**: Locks device to only show DQMP display (optional)
 - **Crash Recovery**: Auto-restarts if app crashes or stops unexpectedly
 - **No Timeouts**: Runs indefinitely without session limitations
 
-### 🔊 Professional Audio System
+### Professional Audio System
 - **Multi-Language TTS**: Sinhala, Tamil, English with proper pronunciation
 - **Queue Announcements**: "Token number X, please proceed to counter Y"
 - **Customer Names**: Announces first names in preferred language
@@ -26,21 +26,21 @@
 - **Professional Controls**: Volume, speed, language, and tone settings
 - **Audio Testing**: Built-in test functionality for system verification
 
-### 📱 TV-Optimized Interface
+### TV-Optimized Interface
 - **10-Foot Design**: Perfect readability from TV viewing distance
 - **D-Pad Navigation**: Fully optimized for TV remote control
 - **Professional Animations**: Smooth transitions and loading states
 - **High Contrast**: Excellent visibility in bright retail environments
 - **Responsive Layout**: Adapts to different Android TV screen sizes
 
-### 🔧 Enterprise Configuration
+### Enterprise Configuration
 - **Encrypted Storage**: Secure configuration backup and restore
 - **Remote Management**: Support for remote configuration updates
 - **Admin Controls**: Emergency reset and technician access modes
 - **Audit Logging**: Comprehensive logging for troubleshooting
 - **Professional Branding**: Customizable logos and color schemes
 
-## 🎮 TV Remote Controls
+## TV Remote Controls
 
 ### Standard Navigation
 - **D-Pad**: Navigate through UI elements and settings
@@ -51,7 +51,7 @@
 - **Menu Key × 3**: Open display settings (technician access)
 - **Back Key × 5**: Emergency app reset (field engineer access)
 
-## 📋 Setup Instructions
+## Setup Instructions
 
 ### Initial Device Setup
 
@@ -68,14 +68,14 @@
 4. **Instant Activation**: Display immediately starts showing queue information
 5. **Permanent Setup**: Configuration saved permanently, no re-setup needed
 
-## 🔧 How to Build
+## How to Build
 
 1. **Open in Android Studio**: Android Studio Ladybug 2024.2.1 or newer
 2. **Sync Project**: Sync Project with Gradle files
 3. **Build APK**: Build > Build Bundle(s)/APK(s) > Build APK(s)
 4. **Install**: Install `DQMP_Outlet_Display_V1.apk` on Android TV device
 
-## 🔊 Professional Audio Features
+## Professional Audio Features
 
 ### Complete Voice System
 - **Token Calls**: "Token number 105, please proceed to counter 3"
@@ -84,7 +84,7 @@
 - **Multi-Language**: Sinhala, Tamil, English with native pronunciation
 - **Audio Testing**: Built-in test system for verification
 
-## 🖥️ Display Features
+## Display Features
 
 ### Complete Web Dashboard Parity
 - **Now Serving**: Large display of current token with service type
@@ -94,7 +94,7 @@
 - **Recent Calls History**: Scrolling history of recently called tokens
 - **Branch Notices**: System announcements and closure notices
 
-## 🚀 Enterprise Features
+## Enterprise Features
 
 ### Professional Deployment
 - **Auto-Start on Boot**: Launches immediately when device powers on
@@ -109,7 +109,7 @@
 - **Self-Healing**: Automatic recovery from common issues
 - **Professional Monitoring**: Real-time performance and health checks
 
-## 📱 Device Compatibility
+## Device Compatibility
 
 ### Supported Platforms
 - **Android TV 7.0+**: All major Android TV devices and set-top boxes
@@ -125,7 +125,7 @@
 
 ---
 
-## 🏆 Professional Grade Quality
+## Professional Grade Quality
 
 This application is designed for professional retail environments with enterprise-level reliability, security, and ease of deployment. The one-touch QR setup eliminates manual configuration errors, while the comprehensive audio system and professional display provide the complete queue management experience customers expect.
 
