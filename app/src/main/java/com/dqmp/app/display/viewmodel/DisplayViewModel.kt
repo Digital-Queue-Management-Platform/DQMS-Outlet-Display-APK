@@ -42,7 +42,9 @@ data class TokenCallEvent(
     val customerName: String?,
     val preferredLanguage: String? = "en",
     val eventType: String = "CALL",
-    val customText: String? = null
+    val customText: String? = null,
+    val chimeVolume: Int? = null,
+    val voiceVolume: Int? = null
 )
 
 class DisplayViewModel(private val repository: SettingsRepository) : ViewModel() {
@@ -95,6 +97,8 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private var audioEventsEnabled = true
     private var isPollingActive = false
     private var burstModeUntil = 0L // Burst polling for faster response after events
+    private val processedAudioEventIds = LinkedHashMap<String, Long>()
+    private val processedAudioWindowMs = 60_000L
 
     init {
         viewModelScope.launch {
@@ -151,9 +155,15 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                 }
                 
                 fetchData(outletId)
-                // Aggressive polling for device removal detection:
-                // Check device config more frequently when WebSocket is down
-                delay(if (webSocket != null) 15000 else 3000)  // 15s with WS, 3s without (faster removal detection)
+
+                // Keep the same refresh behavior as the web display dashboard.
+                val refreshSeconds = (_state.value as? DisplayState.Success)
+                    ?.data
+                    ?.displaySettings
+                    ?.refresh
+                    ?.coerceIn(5, 60)
+                    ?: 10
+                delay(refreshSeconds * 1000L)
             }
         }
     }
@@ -653,6 +663,24 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
      */
     private suspend fun processAudioEventReliable(event: AudioEventResponse) {
         try {
+            val now = System.currentTimeMillis()
+            synchronized(processedAudioEventIds) {
+                // Cleanup old dedupe entries
+                val iterator = processedAudioEventIds.entries.iterator()
+                while (iterator.hasNext()) {
+                    if (now - iterator.next().value > processedAudioWindowMs) {
+                        iterator.remove()
+                    }
+                }
+
+                if (processedAudioEventIds.containsKey(event.id)) {
+                    Log.w("DQMP_AUDIO", "⏭️ Skipping duplicate audio event id=${event.id}, type=${event.type}")
+                    return
+                }
+
+                processedAudioEventIds[event.id] = now
+            }
+
             Log.i("DQMP_AUDIO", "🎵 ==========AUDIO EVENT PROCESSING==========")
             Log.i("DQMP_AUDIO", "📝 Event ID: ${event.id}")
             Log.i("DQMP_AUDIO", "📝 Event Type: ${event.type}")
@@ -664,13 +692,21 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
             
             when (event.type) {
                 "TEST_SOUND" -> {
+                    val normalizedTestType = when ((event.testType ?: "").lowercase()) {
+                        "chime" -> "TEST_CHIME"
+                        "voice" -> "TEST_VOICE"
+                        else -> "TEST_VOICE"
+                    }
+
                     val announcement = TokenCallEvent(
                         tokenNumber = "000",
                         counterNumber = 0,
                         customerName = "",
                         preferredLanguage = event.lang ?: "en",
-                        eventType = event.testType ?: "chime",
-                        customText = event.customText
+                        eventType = normalizedTestType,
+                        customText = event.customText,
+                        chimeVolume = event.chimeVolume,
+                        voiceVolume = event.voiceVolume
                     )
                     
                     Log.i("DQMP_AUDIO", "🔊 EMITTING TEST_SOUND EVENT - Type: ${announcement.eventType}")
@@ -690,8 +726,10 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         counterNumber = counterNumber,
                         customerName = customerName,
                         preferredLanguage = event.lang ?: "en",
-                        eventType = "call", // This will trigger chime + voice
-                        customText = null
+                        eventType = "CALL", // This will trigger chime + voice
+                        customText = null,
+                        chimeVolume = event.chimeVolume,
+                        voiceVolume = event.voiceVolume
                     )
                     
                     Log.i("DQMP_AUDIO", "🔊 EMITTING TOKEN_CALLED EVENT - Customer: $customerName, Token: $tokenNumber, Counter: $counterNumber")

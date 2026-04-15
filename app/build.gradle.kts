@@ -103,6 +103,7 @@ dependencies {
     // Audio & Media
     implementation("androidx.media3:media3-exoplayer:1.1.1")
     implementation("androidx.media3:media3-ui:1.1.1")
+    implementation("androidx.media3:media3-datasource:1.1.1")
     
     // Work Manager for background tasks
     implementation("androidx.work:work-runtime-ktx:2.8.1")

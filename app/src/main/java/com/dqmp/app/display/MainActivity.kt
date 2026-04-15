@@ -180,9 +180,12 @@ class MainActivity : ComponentActivity() {
                         // Get current display settings to check if announcements are enabled
                         val currentState = viewModel.state.value
                         val playTone = (currentState as? DisplayState.Success)?.data?.displaySettings?.playTone ?: true
+                        val chimeVolumePercent = (event.chimeVolume ?: 100).coerceIn(0, 100)
+                        val voiceVolumePercent = (event.voiceVolume ?: 300).coerceIn(0, 300)
+                        val shouldPlayChime = playTone || event.eventType == "TEST_CHIME"
                         
                         // 1. Play Chime (if enabled) - EXACTLY like web dashboard
-                        if (playTone) {
+                        if (shouldPlayChime) {
                             try {
                                 val mp = MediaPlayer.create(this@MainActivity, R.raw.announcement)
                                 mp?.let { player ->
@@ -194,8 +197,8 @@ class MainActivity : ComponentActivity() {
                                             .build()
                                     )
                                     
-                                    // Set volume to maximum
-                                    player.setVolume(1.0f, 1.0f)
+                                    val chimeVolume = (chimeVolumePercent / 100f).coerceIn(0f, 1f)
+                                    player.setVolume(chimeVolume, chimeVolume)
                                     
                                     // Get the actual duration of the chime
                                     val chimeDuration = player.duration
@@ -258,7 +261,7 @@ class MainActivity : ComponentActivity() {
                                 ?: SettingsRepository.DEFAULT_URL
                             
                             Log.d("DQMP_AUDIO", "Announcement Triggered: Type=$isRecall, Language=$lang, Phrase=$phrase")
-                            speakBackend(baseUrl, phrase, lang)
+                            speakBackend(baseUrl, phrase, lang, voiceVolumePercent)
                         } else {
                             Log.d("DQMP_AUDIO", "Skipping TTS for event type: ${event.eventType}")
                         }
@@ -268,19 +271,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun speakBackend(baseUrl: String, text: String, lang: String) {
+    private fun speakBackend(baseUrl: String, text: String, lang: String, voiceVolumePercent: Int = 300) {
         val sanitizedUrl = baseUrl.removeSuffix("/")
         try {
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
-            val ttsUrl = "$sanitizedUrl/tts/speak?text=$encodedText&lang=$lang"
+            val ttsUrl = "$sanitizedUrl/tts/speak?text=$encodedText&lang=$lang&gender=female"
             
             Log.d("DQMP_AUDIO", "Streaming TTS from: $ttsUrl")
             val mp = MediaPlayer()
+            
+            // SET AUDIO ATTRIBUTES FOR VOICE - CRITICAL FIX!
+            mp.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            
             mp.setDataSource(ttsUrl)
-            mp.setOnPreparedListener { it.start() }
-            mp.setOnCompletionListener { it.release() }
-            mp.setOnErrorListener { _, _, _ -> 
-                Log.e("DQMP_AUDIO", "Backend TTS Stream failed. Falling back.")
+            mp.setOnPreparedListener {
+                val normalized = (voiceVolumePercent.coerceIn(0, 300) / 300f).coerceIn(0f, 1f)
+                Log.d("DQMP_AUDIO", "Voice volume set to ${(normalized * 100).toInt()}%")
+                it.setVolume(normalized, normalized)
+                it.start()
+                Log.d("DQMP_AUDIO", "Voice announcement started playing")
+            }
+            mp.setOnCompletionListener { 
+                Log.d("DQMP_AUDIO", "Voice announcement completed")
+                it.release() 
+            }
+            mp.setOnErrorListener { _, what, extra -> 
+                Log.e("DQMP_AUDIO", "Backend TTS Stream failed (error: $what, $extra). Falling back to device TTS.")
                 tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
                 true 
             }
