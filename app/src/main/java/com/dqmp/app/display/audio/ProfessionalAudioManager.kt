@@ -5,11 +5,14 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
+import com.dqmp.app.display.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.*
@@ -109,6 +112,13 @@ class ProfessionalAudioManager(
                     result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     Log.w("AUDIO_MGR", "English TTS not supported, using default")
                 }
+
+                textToSpeech.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
                 
                 // Configure TTS settings
                 textToSpeech.setSpeechRate(settings.ttsSpeed)
@@ -296,20 +306,14 @@ class ProfessionalAudioManager(
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .build()
                 )
                 
-                // Try to load tone from resources
-                try {
-                    setDataSource(context, android.net.Uri.parse("android.resource://${context.packageName}/raw/ding"))
-                    prepare()
-                    start()
-                } catch (e: Exception) {
-                    // Generate programmatic tone if file not available
-                    Log.w("AUDIO_MGR", "Custom tone not available, using system notification")
-                }
+                setDataSource(context, Uri.parse("android.resource://${context.packageName}/${R.raw.ding}"))
+                prepare()
+                start()
             }
         } catch (e: Exception) {
             Log.e("AUDIO_MGR", "Failed to play notification tone", e)
@@ -386,9 +390,15 @@ class ProfessionalAudioManager(
             // Set speech rate and pitch
             textToSpeech.setSpeechRate(settings.ttsSpeed)
             textToSpeech.setPitch(1.0f)
+
+            val params = Bundle().apply {
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, settings.volume.coerceIn(0f, 1f))
+            }
             
             // Speak the text
-            val result = textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            val result = textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
             
             if (result == TextToSpeech.ERROR) {
                 Log.e("AUDIO_MGR", "TTS speak failed for text: $text")

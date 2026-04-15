@@ -67,6 +67,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.dqmp.app.display.R
 import com.dqmp.app.display.data.BranchStatusResponse
@@ -785,12 +786,14 @@ private fun PlaylistVideoPlayer(
         factory = { ctx ->
             PlayerView(ctx).apply {
                 useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 this.player = player
                 setShutterBackgroundColor(android.graphics.Color.BLACK)
             }
         },
         update = { view ->
             view.player = player
+                view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         }
     )
 }
