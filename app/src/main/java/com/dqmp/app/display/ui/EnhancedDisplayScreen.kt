@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -906,6 +907,7 @@ private fun UpNextSidebar(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(
+                                    modifier = Modifier.weight(1f),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, scale))
                                 ) {
@@ -942,20 +944,27 @@ private fun UpNextSidebar(
                                     }
                                 }
 
-                                if (highlighted) {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Color(0xFF4F46E5), RoundedCornerShape(999.dp))
-                                            .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(6.dp, scale))
-                                    ) {
-                                        Text(
-                                            text = "Please Prepare",
-                                            color = Color.White,
-                                            fontSize = responsiveSp(12, scale),
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = WebDisplayFont,
-                                            letterSpacing = 0.5.sp
-                                        )
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = responsiveDp(8.dp, scale))
+                                        .widthIn(min = responsiveDp(132.dp, scale)),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    if (highlighted) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color(0xFF4F46E5), RoundedCornerShape(999.dp))
+                                                .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(6.dp, scale))
+                                        ) {
+                                            Text(
+                                                text = "Please Prepare",
+                                                color = Color.White,
+                                                fontSize = responsiveSp(12, scale),
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = WebDisplayFont,
+                                                letterSpacing = 0.5.sp
+                                            )
+                                        }
                                     }
                                 }
                             }

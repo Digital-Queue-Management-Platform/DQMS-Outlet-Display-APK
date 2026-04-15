@@ -36,6 +36,7 @@ import com.dqmp.app.display.ui.theme.Emerald500
 import com.dqmp.app.display.ui.theme.Slate900
 import com.dqmp.app.display.viewmodel.DisplayState
 import com.dqmp.app.display.viewmodel.DisplayViewModel
+import java.util.concurrent.ConcurrentHashMap
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private var lastBackPressTime = 0L
     private var menuPressCount = 0
     private var lastMenuPressTime = 0L
+    private val recentAudioEvents = ConcurrentHashMap<String, Long>()
     
     // Professional components
     private var displayViewModel: DisplayViewModel? = null
@@ -176,6 +178,16 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     viewModel.announcementEvent.collect { event ->
                         Log.d("DQMP_AUDIO", "MainActivity caught announcement event: ${event.eventType}")
+
+                        val dedupeKey = "${event.eventType}|${event.tokenNumber}|${event.counterNumber}|${event.preferredLanguage}|${event.customText}".lowercase()
+                        val nowMs = System.currentTimeMillis()
+                        recentAudioEvents.entries.removeIf { nowMs - it.value > 3500L }
+                        val seenAt = recentAudioEvents[dedupeKey]
+                        if (seenAt != null && (nowMs - seenAt) < 3500L) {
+                            Log.d("DQMP_AUDIO", "⏭️ Skipping duplicate audio event: $dedupeKey")
+                            return@collect
+                        }
+                        recentAudioEvents[dedupeKey] = nowMs
                         
                         // Get current display settings to check if announcements are enabled
                         val currentState = viewModel.state.value
@@ -275,7 +287,8 @@ class MainActivity : ComponentActivity() {
         val sanitizedUrl = baseUrl.removeSuffix("/")
         try {
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
-            val ttsUrl = "$sanitizedUrl/tts/speak?text=$encodedText&lang=$lang&gender=female"
+            val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
+            val ttsUrl = "$ttsBase/tts/speak?text=$encodedText&lang=$lang&gender=female"
             
             Log.d("DQMP_AUDIO", "Streaming TTS from: $ttsUrl")
             val mp = MediaPlayer()
