@@ -361,7 +361,7 @@ class ProfessionalAudioManager(
         val counter = announcement.counterNumber?.toString() ?: "counter"
         
         return when (lang) {
-            "si", "sinhala" -> "ටෝකන් අංක $tokenNum නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටරය $counter වෙත පැමිණෙන්න."
+            "si", "sinhala" -> "ටෝකන් අංක $tokenNum නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
             "ta", "tamil" -> "டோக்கன் எண் $tokenNum மீண்டும் அழைக்கப்படுகிறது. தயவுசெய்து உடனடியாக கவுண்டர் $counter க்கு வாருங்கள்."
             else -> "Token number $tokenNum is being recalled. Please proceed to counter $counter immediately."
         }
