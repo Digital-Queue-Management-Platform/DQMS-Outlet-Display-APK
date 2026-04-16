@@ -918,14 +918,9 @@ private fun UpNextSidebar(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = WebDisplayFont
                                     )
-                                    Column {
-                                        Text(
-                                            text = "Queue Position: ${idx + 1}",
-                                            color = if (highlighted) Color(0xFF475569) else Color(0xFF94A3B8),
-                                            fontSize = responsiveSp(20, scale),
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontFamily = WebDisplayFont
-                                        )
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(responsiveDp(4.dp, scale))
+                                    ) {
                                         if (showService && token.serviceTypes.isNotEmpty()) {
                                             FlowRow(horizontalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))) {
                                                 token.serviceTypes.forEach { service ->
@@ -951,19 +946,55 @@ private fun UpNextSidebar(
                                     contentAlignment = Alignment.CenterEnd
                                 ) {
                                     if (highlighted) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0xFF4F46E5), RoundedCornerShape(999.dp))
-                                                .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(6.dp, scale))
+                                        Column(
+                                            horizontalAlignment = Alignment.End,
+                                            verticalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))
                                         ) {
-                                            Text(
-                                                text = "Please Prepare",
-                                                color = Color.White,
-                                                fontSize = responsiveSp(12, scale),
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = WebDisplayFont,
-                                                letterSpacing = 0.5.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))
+                                            ) {
+                                                Text(
+                                                    text = "QUEUE POSITION",
+                                                    color = Color(0xFF64748B),
+                                                    fontSize = responsiveSp(12, scale),
+                                                    fontWeight = FontWeight.Black,
+                                                    letterSpacing = 0.8.sp,
+                                                    fontFamily = WebDisplayFont
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(responsiveDp(10.dp, scale)))
+                                                        .background(Color(0xFFE2E8F0))
+                                                        .padding(
+                                                            horizontal = responsiveDp(10.dp, scale),
+                                                            vertical = responsiveDp(4.dp, scale)
+                                                        )
+                                                ) {
+                                                    Text(
+                                                        text = "#${idx + 1}",
+                                                        color = Color(0xFF0F172A),
+                                                        fontSize = responsiveSp(22, scale),
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        fontFamily = WebDisplayFont
+                                                    )
+                                                }
+                                            }
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0xFF4F46E5), RoundedCornerShape(999.dp))
+                                                    .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(6.dp, scale))
+                                            ) {
+                                                Text(
+                                                    text = "Please Prepare",
+                                                    color = Color.White,
+                                                    fontSize = responsiveSp(12, scale),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = WebDisplayFont,
+                                                    letterSpacing = 0.5.sp
+                                                )
+                                            }
                                         }
                                     }
                                 }

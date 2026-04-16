@@ -497,8 +497,10 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     
                     // --- Audio Announcement Logic ---
                     val currentToken = data.inService.firstOrNull()
-                    if (currentToken != null) {
-                        val fallbackAnnouncementKey = "${currentToken.tokenNumber}|${currentToken.counterNumber}|${(currentToken.customer?.preferredLanguage ?: "en").lowercase()}"
+                    val liveAudioChannelActive = isPollingActive || _isWebSocketConnected.value
+                    if (currentToken != null && !liveAudioChannelActive) {
+                        val normalizedFallbackLang = normalizeLanguage(currentToken.customer?.preferredLanguage)
+                        val fallbackAnnouncementKey = "${currentToken.tokenNumber}|${currentToken.counterNumber}|$normalizedFallbackLang"
                         val nowMs = System.currentTimeMillis()
                         val recentlyAnnouncedByLiveAudio =
                             lastLiveAudioAnnouncementKey == fallbackAnnouncementKey &&
@@ -519,12 +521,14 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                                         tokenNumber = currentToken.tokenNumber.toString(),
                                         counterNumber = currentToken.counterNumber,
                                         customerName = currentToken.customer?.name,
-                                        preferredLanguage = currentToken.customer?.preferredLanguage ?: "en"
+                                        preferredLanguage = normalizedFallbackLang
                                     )
                                 )
                                 lastAnnouncedEventKey = eventKey
                             }
                         }
+                    } else if (currentToken != null) {
+                        Log.d("DQMP_AUDIO", "Skipping fetchData fallback announcement because live audio channel is active")
                     }
                     
                     // Only update UI state if data actually changed (performance optimization)
@@ -751,18 +755,20 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                         "CALL"
                     }
 
+                    val resolvedLang = resolveTokenAnnouncementLanguage(tokenNumber, event.lang)
+
                     val announcement = TokenCallEvent(
                         tokenNumber = tokenNumber,
                         counterNumber = counterNumber,
                         customerName = customerName,
-                        preferredLanguage = event.lang ?: "en",
+                        preferredLanguage = resolvedLang,
                         eventType = normalizedEventType,
                         customText = null,
                         chimeVolume = event.chimeVolume,
                         voiceVolume = event.voiceVolume
                     )
 
-                    val liveKey = "$tokenNumber|$counterNumber|${(event.lang ?: "en").lowercase()}"
+                    val liveKey = "$tokenNumber|$counterNumber|$resolvedLang"
                     lastLiveAudioAnnouncementKey = liveKey
                     lastLiveAudioAnnouncementAt = System.currentTimeMillis()
                     
@@ -787,6 +793,32 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         audioPollingJob?.cancel()
         audioPollingJob = null
         Log.i("DQMP_POLL", "🛑 Stopped HTTP audio polling")
+    }
+
+    private fun normalizeLanguage(raw: String?): String {
+        return when (raw?.trim()?.lowercase()) {
+            "si", "sinhala", "sinhalese" -> "si"
+            "ta", "tamil" -> "ta"
+            "en", "english" -> "en"
+            else -> "en"
+        }
+    }
+
+    private fun resolveTokenAnnouncementLanguage(tokenNumber: String, eventLang: String?): String {
+        val normalizedEventLang = normalizeLanguage(eventLang)
+        if (normalizedEventLang != "en") {
+            return normalizedEventLang
+        }
+
+        val stateData = (_state.value as? DisplayState.Success)?.data
+        val preferred = stateData?.inService
+            ?.firstOrNull { it.tokenNumber.toString() == tokenNumber }
+            ?.customer?.preferredLanguage
+            ?: stateData?.recentlyCalled
+                ?.firstOrNull { it.tokenNumber.toString() == tokenNumber }
+                ?.customer?.preferredLanguage
+
+        return normalizeLanguage(preferred)
     }
 }
 

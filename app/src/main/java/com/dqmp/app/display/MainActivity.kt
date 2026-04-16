@@ -200,8 +200,9 @@ class MainActivity : ComponentActivity() {
                     viewModel.announcementEvent.collect { event ->
                         Log.d("DQMP_AUDIO", "MainActivity caught announcement event: ${event.eventType}")
 
-                        val dedupeKey = "${event.eventType}|${event.tokenNumber}|${event.counterNumber}|${event.preferredLanguage}|${event.customText}".lowercase()
-                        val speechKey = "${event.tokenNumber}|${event.counterNumber}|${event.preferredLanguage}".lowercase()
+                        val normalizedLang = normalizeAnnouncementLanguage(event.preferredLanguage)
+                        val dedupeKey = "${event.eventType}|${event.tokenNumber}|${event.counterNumber}|$normalizedLang|${event.customText}".lowercase()
+                        val speechKey = "${event.tokenNumber}|${event.counterNumber}|$normalizedLang".lowercase()
                         val nowMs = System.currentTimeMillis()
                         recentAudioEvents.entries.removeIf { nowMs - it.value > 3500L }
                         recentTokenSpeech.entries.removeIf { nowMs - it.value > 8000L }
@@ -245,7 +246,7 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         // 2. Build Phrase based on language and event type - EXACTLY like web dashboard
-                        val lang = event.preferredLanguage?.lowercase() ?: "en"
+                        val lang = normalizedLang
                         val isRecall = event.eventType == "RECALL"
                         val num = event.tokenNumber
                         val counter = event.counterNumber ?: "?"
@@ -300,36 +301,10 @@ class MainActivity : ComponentActivity() {
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
             val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
             val ttsUrl = "$ttsBase/tts/speak?text=$encodedText&lang=$lang&gender=female"
-            
-            Log.d("DQMP_AUDIO", "Streaming TTS from: $ttsUrl")
-            val mp = MediaPlayer()
-            
-            // SET AUDIO ATTRIBUTES FOR VOICE - CRITICAL FIX!
-            mp.setAudioAttributes(
-                android.media.AudioAttributes.Builder()
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .build()
-            )
-            
-            mp.setDataSource(ttsUrl)
-            mp.setOnPreparedListener {
-                val normalized = (voiceVolumePercent.coerceIn(0, 300) / 300f).coerceIn(0f, 1f)
-                Log.d("DQMP_AUDIO", "Voice volume set to ${(normalized * 100).toInt()}%")
-                it.setVolume(normalized, normalized)
-                it.start()
-                Log.d("DQMP_AUDIO", "Voice announcement started playing")
-            }
-            mp.setOnCompletionListener { 
-                Log.d("DQMP_AUDIO", "Voice announcement completed")
-                it.release() 
-            }
-            mp.setOnErrorListener { _, what, extra -> 
-                Log.e("DQMP_AUDIO", "Backend TTS Stream failed (error: $what, $extra). Falling back to device TTS.")
-                playFetchedTts(ttsUrl, voiceVolumePercent, text, lang)
-                true 
-            }
-            mp.prepareAsync()
+
+            // Use fully fetched audio for reliability; streaming can cut long Sinhala/Tamil recalls.
+            Log.d("DQMP_AUDIO", "Playing fetched backend TTS from: $ttsUrl")
+            playFetchedTts(ttsUrl, voiceVolumePercent, text, lang)
         } catch (e: Exception) {
             Log.e("DQMP_AUDIO", "Failed to setup backend TTS player", e)
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
@@ -414,6 +389,15 @@ class MainActivity : ComponentActivity() {
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
             Log.w("DQMP_AUDIO", "Fallback TTS language $lang not supported, using US English")
             ttsInstance.setLanguage(java.util.Locale.US)
+        }
+    }
+
+    private fun normalizeAnnouncementLanguage(raw: String?): String {
+        return when (raw?.trim()?.lowercase()) {
+            "si", "sinhala", "sinhalese" -> "si"
+            "ta", "tamil" -> "ta"
+            "en", "english" -> "en"
+            else -> "en"
         }
     }
 
