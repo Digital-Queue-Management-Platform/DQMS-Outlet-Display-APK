@@ -55,7 +55,8 @@ data class DisplaySettings(
     val recent: Boolean? = true,
     val autoSlide: Boolean? = true,
     val playTone: Boolean? = true,
-    val contentScale: Int? = 100
+    val contentScale: Int? = 100,
+    val videoId: String? = "Iea84C32YHA"
 )
 
 @Serializable

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import okio.ByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -33,6 +34,41 @@ class WebSocketClient(
         private const val RECONNECT_MAX_DELAY_MS = 30000L
         private const val RECONNECT_MULTIPLIER = 1.5f
         private const val MAX_RECONNECT_ATTEMPTS = Int.MAX_VALUE // Infinite retry
+    }
+
+    private fun resolveLanguage(data: JSONObject): String {
+        val direct = data.optString("customerLang", data.optString("lang", "")).lowercase()
+        if (direct == "en" || direct == "si" || direct == "ta") {
+            return direct
+        }
+
+        val preferredLanguages = data.opt("preferredLanguages")
+        if (preferredLanguages is JSONArray && preferredLanguages.length() > 0) {
+            val first = preferredLanguages.optString(0, "").lowercase()
+            if (first == "en" || first == "si" || first == "ta") {
+                return first
+            }
+            if (first.contains("si")) return "si"
+            if (first.contains("ta")) return "ta"
+        } else if (preferredLanguages is String) {
+            val lowered = preferredLanguages.lowercase()
+            if (lowered.contains("si")) return "si"
+            if (lowered.contains("ta")) return "ta"
+            if (lowered.contains("en")) return "en"
+        }
+
+        return if (direct.isNotBlank()) direct else "en"
+    }
+
+    private fun resolveFirstName(data: JSONObject): String {
+        val firstName = data.optString("firstName", data.optString("customerName", "Customer"))
+        if (firstName.isNotBlank() && firstName != "null") {
+            return firstName.split(" ").firstOrNull().orEmpty().ifBlank { "Customer" }
+        }
+
+        val customer = data.optJSONObject("customer")
+        val nestedName = customer?.optString("name", "") ?: ""
+        return nestedName.split(" ").firstOrNull().orEmpty().ifBlank { "Customer" }
     }
 
     private var webSocket: WebSocket? = null
@@ -223,8 +259,8 @@ class WebSocketClient(
             
             val tokenNumber = data.optInt("tokenNumber", 0)
             val counterNumber = data.optInt("counterNumber", 0)
-            val firstName = data.optString("firstName", "Customer")
-            val customerLang = data.optString("customerLang", "en")
+            val firstName = resolveFirstName(data)
+            val customerLang = resolveLanguage(data)
             
             Log.i(TAG, "Token called: $tokenNumber at counter $counterNumber, lang: $customerLang")
             
@@ -264,8 +300,8 @@ class WebSocketClient(
             
             val tokenNumber = data.optInt("tokenNumber", 0)
             val counterNumber = data.optInt("counterNumber", 0)
-            val firstName = data.optString("firstName", "Customer")
-            val customerLang = data.optString("customerLang", "en")
+            val firstName = resolveFirstName(data)
+            val customerLang = resolveLanguage(data)
             
             Log.i(TAG, "Token recalled: $tokenNumber at counter $counterNumber")
             

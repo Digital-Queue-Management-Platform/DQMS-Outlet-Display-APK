@@ -6,11 +6,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -20,6 +20,7 @@ import com.dqmp.app.display.R
 import com.dqmp.app.display.model.DisplaySettings
 import com.dqmp.app.display.ui.theme.ThemeProvider
 import com.dqmp.app.display.viewmodel.SettingsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,6 +111,10 @@ fun SettingsScreen(
                     settings = settings,
                     onSettingsChange = viewModel::updateSettings,
                     onTestAnnouncement = viewModel::testAnnouncement,
+                    onPlayChime = viewModel::playChimeOnly,
+                    onPlayVoice = viewModel::playVoiceMessage,
+                    onPlayAllLanguages = viewModel::playAllLanguagesSequentially,
+                    onTranslateEnglish = viewModel::translateFromEnglish,
                     theme = theme
                 )
             }
@@ -344,13 +349,24 @@ private fun ThemeSelector(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AudioSettings(
     settings: DisplaySettings,
     onSettingsChange: (DisplaySettings) -> Unit,
     onTestAnnouncement: () -> Unit,
+    onPlayChime: () -> Unit,
+    onPlayVoice: (text: String, language: String) -> Unit,
+    onPlayAllLanguages: (english: String, sinhala: String, tamil: String) -> Unit,
+    onTranslateEnglish: suspend (text: String, target: String) -> String?,
     theme: com.dqmp.app.display.ui.theme.AppTheme
 ) {
+    val scope = rememberCoroutineScope()
+    var customEn by rememberSaveable { mutableStateOf("") }
+    var customSi by rememberSaveable { mutableStateOf("") }
+    var customTa by rememberSaveable { mutableStateOf("") }
+    var isTranslating by rememberSaveable { mutableStateOf(false) }
+
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -416,6 +432,124 @@ private fun AudioSettings(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(stringResource(R.string.test_announcement))
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = onPlayChime,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Play Chime")
+            }
+            OutlinedButton(
+                onClick = { onPlayVoice("This is a speaker test announcement.", settings.language) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Play Voice")
+            }
+        }
+
+        Divider(color = theme.textSecondary.copy(alpha = 0.2f))
+
+        Text(
+            text = "Manual Text Announcement (Multi-Language)",
+            color = theme.text,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        OutlinedTextField(
+            value = customEn,
+            onValueChange = { customEn = it },
+            label = { Text("English") },
+            placeholder = { Text("Type English message...") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                focusedTextColor = theme.text,
+                unfocusedTextColor = theme.textSecondary,
+                focusedBorderColor = theme.accent,
+                unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.5f)
+            )
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = {
+                    if (customEn.isBlank() || isTranslating) return@OutlinedButton
+                    scope.launch {
+                        isTranslating = true
+                        val si = onTranslateEnglish(customEn, "si")
+                        val ta = onTranslateEnglish(customEn, "ta")
+                        if (!si.isNullOrBlank()) customSi = si
+                        if (!ta.isNullOrBlank()) customTa = ta
+                        isTranslating = false
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                enabled = customEn.isNotBlank() && !isTranslating
+            ) {
+                Text(if (isTranslating) "Translating..." else "Translate")
+            }
+            OutlinedButton(
+                onClick = { if (customEn.isNotBlank()) onPlayVoice(customEn, "en") },
+                modifier = Modifier.weight(1f),
+                enabled = customEn.isNotBlank()
+            ) {
+                Text("Play EN")
+            }
+        }
+
+        OutlinedTextField(
+            value = customSi,
+            onValueChange = { customSi = it },
+            label = { Text("සිංහල") },
+            placeholder = { Text("සිංහල නිවේදනය...") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                focusedTextColor = theme.text,
+                unfocusedTextColor = theme.textSecondary,
+                focusedBorderColor = theme.accent,
+                unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.5f)
+            )
+        )
+
+        OutlinedButton(
+            onClick = { if (customSi.isNotBlank()) onPlayVoice(customSi, "si") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = customSi.isNotBlank()
+        ) {
+            Text("Play SI")
+        }
+
+        OutlinedTextField(
+            value = customTa,
+            onValueChange = { customTa = it },
+            label = { Text("தமிழ்") },
+            placeholder = { Text("தமிழ் அறிவிப்பு...") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                focusedTextColor = theme.text,
+                unfocusedTextColor = theme.textSecondary,
+                focusedBorderColor = theme.accent,
+                unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.5f)
+            )
+        )
+
+        OutlinedButton(
+            onClick = { if (customTa.isNotBlank()) onPlayVoice(customTa, "ta") },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = customTa.isNotBlank()
+        ) {
+            Text("Play TA")
+        }
+
+        Button(
+            onClick = { onPlayAllLanguages(customEn, customSi, customTa) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = customEn.isNotBlank() || customSi.isNotBlank() || customTa.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = theme.accent)
+        ) {
+            Text("PLAY ALL LANGUAGES SEQUENTIALLY")
         }
     }
 }

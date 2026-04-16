@@ -1,757 +1,1080 @@
 package com.dqmp.app.display.ui
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import android.content.Intent
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.dqmp.app.display.R
-import com.dqmp.app.display.data.*
-import com.dqmp.app.display.ui.theme.*
+import com.dqmp.app.display.data.BranchStatusResponse
+import com.dqmp.app.display.data.DisplayData
+import com.dqmp.app.display.data.Notice
+import com.dqmp.app.display.data.Token
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
+private val WebDisplayFont = FontFamily.SansSerif
+
+private fun isDirectMp4Url(url: String): Boolean {
+    val lower = url.lowercase(Locale.US)
+    return (lower.startsWith("http://") || lower.startsWith("https://")) &&
+        (lower.contains(".mp4") || lower.contains(".mp4?"))
+}
+
+private fun promoCacheFileForUrl(context: android.content.Context, url: String): File {
+    val safeName = url.hashCode().toUInt().toString(16)
+    return File(File(context.cacheDir, "promo-video-cache"), "$safeName.mp4")
+}
+
+private fun downloadPromoVideoToCache(context: android.content.Context, url: String): File? {
+    val cacheFile = promoCacheFileForUrl(context, url)
+    if (cacheFile.exists() && cacheFile.length() > 0L) return cacheFile
+
+    cacheFile.parentFile?.mkdirs()
+
+    return try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000
+            readTimeout = 30000
+            instanceFollowRedirects = true
+            requestMethod = "GET"
+        }
+
+        connection.connect()
+
+        if (connection.responseCode !in 200..299) {
+            connection.disconnect()
+            return null
+        }
+
+        connection.inputStream.use { input ->
+            FileOutputStream(cacheFile).use { output ->
+                input.copyTo(output)
+            }
+        }
+
+        connection.disconnect()
+        if (cacheFile.exists() && cacheFile.length() > 0L) cacheFile else null
+    } catch (_: Exception) {
+        if (cacheFile.exists()) cacheFile.delete()
+        null
+    }
+}
+
+private fun String.toWebCapitalize(): String {
+    return split(" ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { part ->
+            part.lowercase().replaceFirstChar { c ->
+                if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
+            }
+        }
+}
 
 @Composable
 fun EnhancedDisplayScreen(
     data: DisplayData,
-    counters: List<CounterStatus>,
+    counters: List<com.dqmp.app.display.data.CounterStatus>,
     branchStatus: BranchStatusResponse,
     isStale: Boolean = false,
     lastSync: Long = 0L,
     clockSkew: Long = 0L
 ) {
-    // Performance optimizations: Cache expensive calculations
-    val settings = remember(data.displaySettings) { data.displaySettings }
-    val zoomScale = remember(settings?.contentScale) { (settings?.contentScale ?: 100).toFloat() / 100f }
-    
-    // Optimize time updates to avoid frequent recompositions 
-    var currentTime by remember { mutableStateOf(Date(System.currentTimeMillis() + clockSkew)) }
-    val slTimeZone = remember { TimeZone.getTimeZone("GMT+05:30") }
-    val timeFormat = remember { 
-        SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).apply { timeZone = slTimeZone } 
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val settings = remember(data.displaySettings) { data.displaySettings }
+        val zoomScale = remember(settings?.contentScale) { (settings?.contentScale ?: 100).toFloat() / 100f }
+        val responsiveScale = remember(maxWidth, maxHeight, zoomScale) {
+            val widthScale = maxWidth.value / 1920f
+            val heightScale = maxHeight.value / 1080f
+            minOf(widthScale, heightScale).coerceIn(0.72f, 1.18f) * zoomScale
+        }
+
+        var currentTime by remember { mutableStateOf(Date(System.currentTimeMillis() + clockSkew)) }
+        val slTimeZone = remember { TimeZone.getTimeZone("GMT+05:30") }
+        val timeFormat = remember {
+            SimpleDateFormat("hh:mm:ss a", Locale.getDefault()).apply { timeZone = slTimeZone }
+        }
+        val dateFormat = remember {
+            SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).apply { timeZone = slTimeZone }
+        }
+
+        LaunchedEffect(clockSkew) {
+            while (true) {
+                currentTime = Date(System.currentTimeMillis() + clockSkew)
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+
+        val servingByCounter = remember(data.inService) {
+            data.inService
+                .take(4)
+                .sortedBy { it.counterNumber ?: Int.MAX_VALUE }
+        }
+        val upNext = remember(data.waiting) { data.waiting.take(6) }
+
+        val hasNowServing = servingByCounter.isNotEmpty()
+        val leftTopWeight = if (hasNowServing) 6f else 0f
+        val leftVideoWeight = if (hasNowServing) 4f else 10f
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF8FAFC))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x08003366), Color.Transparent),
+                        center = androidx.compose.ui.geometry.Offset(150f, 120f),
+                        radius = 1000f
+                    )
+                )
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x0D0EA5E9), Color.Transparent),
+                        center = androidx.compose.ui.geometry.Offset(1800f, 900f),
+                        radius = 1000f
+                    )
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = 1f,
+                        scaleY = 1f,
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    )
+                    .padding(responsiveDp(24.dp, responsiveScale))
+            ) {
+                WebHeader(
+                    outletName = (data.outletMeta?.name ?: "Sri Lanka Telecom").toWebCapitalize(),
+                    location = data.outletMeta?.location ?: "Outlet Service Portal",
+                    now = currentTime,
+                    timeFormat = timeFormat,
+                    dateFormat = dateFormat,
+                    scale = responsiveScale
+                )
+
+                Spacer(modifier = Modifier.height(responsiveDp(12.dp, responsiveScale)))
+
+                val notice = branchStatus.activeNotice ?: branchStatus.standardNotice
+                if (notice != null) {
+                    NoticeBar(notice = notice, scale = responsiveScale)
+                    Spacer(modifier = Modifier.height(responsiveDp(8.dp, responsiveScale)))
+                }
+
+                if (isStale) {
+                    ErrorStrip(message = "Connection lost. Data may be outdated.", scale = responsiveScale)
+                    Spacer(modifier = Modifier.height(responsiveDp(8.dp, responsiveScale)))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, responsiveScale))
+                ) {
+                    Column(
+                        modifier = Modifier.weight(7f),
+                        verticalArrangement = Arrangement.spacedBy(responsiveDp(12.dp, responsiveScale))
+                    ) {
+                        if (hasNowServing) {
+                            NowServingPanel(
+                                modifier = Modifier.weight(leftTopWeight),
+                                tokens = servingByCounter,
+                                scale = responsiveScale
+                            )
+                        }
+
+                        PromoVideoPanel(
+                            modifier = Modifier.weight(leftVideoWeight),
+                            videoId = settings?.videoId ?: "Iea84C32YHA",
+                            scale = responsiveScale
+                        )
+                    }
+
+                    UpNextSidebar(
+                        modifier = Modifier.weight(3f),
+                        tokens = upNext,
+                        showService = settings?.services ?: false,
+                        totalWaiting = data.totalWaiting,
+                        totalServing = data.inService.size,
+                        totalCounters = data.availableOfficers,
+                        scale = responsiveScale
+                    )
+                }
+            }
+        }
     }
-    val dateFormat = remember { 
-        SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault()).apply { timeZone = slTimeZone } 
-    }
-    
-    // Optimized time updates - only update when clockSkew changes
-    LaunchedEffect(clockSkew) {
-        while (true) {
-            currentTime = Date(System.currentTimeMillis() + clockSkew)
-            kotlinx.coroutines.delay(1000)
+}
+
+private fun responsiveDp(base: androidx.compose.ui.unit.Dp, scale: Float): androidx.compose.ui.unit.Dp {
+    return (base.value * scale).dp
+}
+
+private fun responsiveSp(base: Int, scale: Float): androidx.compose.ui.unit.TextUnit {
+    return (base * scale).sp
+}
+
+@Composable
+private fun WebHeader(
+    outletName: String,
+    location: String,
+    now: Date,
+    timeFormat: SimpleDateFormat,
+    dateFormat: SimpleDateFormat,
+    scale: Float
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            .padding(horizontal = responsiveDp(24.dp, scale), vertical = responsiveDp(12.dp, scale))
+            .height(responsiveDp(110.dp, scale)),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, scale))
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.logo),
+                contentDescription = "Logo",
+                modifier = Modifier.height(responsiveDp(84.dp, scale))
+            )
+            Column(verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = outletName,
+                    color = Color(0xFF1E1B4B),
+                    fontSize = responsiveSp(72, scale),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = WebDisplayFont,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(responsiveDp(24.dp, scale))
+                            .height(responsiveDp(2.dp, scale))
+                            .background(Color(0xFF4F46E5), CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(responsiveDp(10.dp, scale)))
+                    Text(
+                        text = location.uppercase(),
+                        color = Color(0xFF4F46E5),
+                        fontSize = responsiveSp(18, scale),
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = WebDisplayFont,
+                        letterSpacing = 2.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(responsiveDp(8.dp, scale))
+        ) {
+            Row(
+                modifier = Modifier
+                    .background(Color(0xFFECFDF5), RoundedCornerShape(999.dp))
+                    .padding(horizontal = responsiveDp(14.dp, scale), vertical = responsiveDp(6.dp, scale)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(responsiveDp(8.dp, scale))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(responsiveDp(8.dp, scale))
+                        .background(Color(0xFF10B981), CircleShape)
+                )
+                Text(
+                    text = "LIVE SYNC",
+                    color = Color(0xFF047857),
+                    fontSize = responsiveSp(12, scale),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = WebDisplayFont,
+                    letterSpacing = 1.sp
+                )
+            }
+
+            Card(
+                shape = RoundedCornerShape(responsiveDp(18.dp, scale)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1B4B)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = responsiveDp(20.dp, scale), vertical = responsiveDp(10.dp, scale)),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = timeFormat.format(now),
+                        color = Color.White,
+                        fontSize = responsiveSp(60, scale),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = WebDisplayFont,
+                        letterSpacing = (-1).sp
+                    )
+                    Text(
+                        text = dateFormat.format(now),
+                        color = Color(0xFFC7D2FE),
+                        fontSize = responsiveSp(18, scale),
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = WebDisplayFont
+                    )
+                }
+            }
         }
     }
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Emerald500.copy(alpha = 0.04f),
-                        Sky400.copy(alpha = 0.03f),
-                        Color.Transparent
-                    ),
-                    center = androidx.compose.ui.geometry.Offset(300f, 100f),
-                    radius = 1200f
-                )
+            .fillMaxWidth()
+            .height(responsiveDp(4.dp, scale))
+            .background(Color(0xFF003366), RoundedCornerShape(999.dp))
+    )
+}
+
+@Composable
+private fun NoticeBar(notice: Notice, scale: Float) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFFFBEB), RoundedCornerShape(16.dp))
+            .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(10.dp, scale)),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(responsiveDp(10.dp, scale))
+    ) {
+        Icon(
+            imageVector = Icons.Default.WarningAmber,
+            contentDescription = null,
+            tint = Color(0xFFD97706),
+            modifier = Modifier.size(responsiveDp(20.dp, scale))
+        )
+        Column {
+            Text(
+                text = notice.title,
+                color = Color(0xFF92400E),
+                fontSize = responsiveSp(13, scale),
+                fontWeight = FontWeight.Bold,
+                fontFamily = WebDisplayFont,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+            if (notice.message.isNotBlank()) {
+                Text(
+                    text = notice.message,
+                    color = Color(0xFFB45309),
+                    fontSize = responsiveSp(11, scale),
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = WebDisplayFont,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorStrip(message: String, scale: Float) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFEF2F2), RoundedCornerShape(16.dp))
+            .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(8.dp, scale)),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(responsiveDp(8.dp, scale))
+    ) {
+        Icon(
+            imageVector = Icons.Default.ErrorOutline,
+            contentDescription = null,
+            tint = Color(0xFFDC2626),
+            modifier = Modifier.size(responsiveDp(16.dp, scale))
+        )
+        Text(
+            text = message,
+            color = Color(0xFFB91C1C),
+            fontSize = responsiveSp(12, scale),
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = WebDisplayFont
+        )
+    }
+}
+
+@Composable
+private fun NowServingPanel(
+    modifier: Modifier,
+    tokens: List<Token>,
+    scale: Float
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(responsiveDp(40.dp, scale)),
+        border = BorderStroke(responsiveDp(4.dp, scale), Color(0xFFF1F5F9)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = responsiveDp(8.dp, scale))
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = zoomScale, 
-                    scaleY = zoomScale,
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-                )
-                .padding(16.dp)
+                .padding(responsiveDp(24.dp, scale))
         ) {
-            // Enhanced Header Section
-            EnhancedHeader(
-                outletName = data.outletMeta?.name ?: "Outlet Queue Display",
-                location = data.outletMeta?.location ?: "Customer queue information",
-                currentTime = currentTime,
-                timeFormat = timeFormat,
-                dateFormat = dateFormat,
-                totalWaiting = data.totalWaiting,
-                serving = data.inService.size,
-                availableOfficers = data.availableOfficers,
-                isStale = isStale
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Notice Bar (if any notices exist)
-            val notice = branchStatus.activeNotice ?: branchStatus.standardNotice
-            if (notice != null) {
-                NoticeBar(
-                    notice = notice,
-                    isCritical = branchStatus.activeNotice != null
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            // Main Content - EXACT WEB DASHBOARD REPLICA
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Performance optimization: Cache token lists to avoid recalculation
-                val servingTokens = remember(data.inService) { data.inService }
-                val nextLimit = remember(settings?.next) { settings?.next ?: 8 }
-                val upNextTokens = remember(data.waiting, nextLimit) { data.waiting.take(nextLimit) }
-                
-                // Now Serving Section - matches web exactly
-                WebStyleContentCard(
-                    modifier = Modifier.weight(1.2f),
-                    title = "Now Serving",
-                    icon = Icons.Default.AutoAwesome // Sparkles equivalent
-                ) {
-                    if (servingTokens.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "No token is currently in service.",
-                                color = Slate600,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    } else {
-                        WebStyleTokenList(
-                            tokens = servingTokens,
-                            backgroundColor = Color(0xFFECFDF5), // bg-emerald-50
-                            borderColor = Color(0xFFA7F3D0), // border-emerald-200
-                            showServices = settings?.services ?: true,
-                            autoSlide = settings?.autoSlide ?: true,
-                            isServing = true
-                        )
-                    }
-                }
-                
-                // Up Next Section - matches web exactly
-                WebStyleContentCard(
-                    modifier = Modifier.weight(1f),
-                    title = "Up Next",
-                    icon = Icons.Default.ConfirmationNumber // Ticket equivalent
-                ) {
-                    if (upNextTokens.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "No waiting tokens right now.",
-                                color = Slate600,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    } else {
-                        WebStyleTokenList(
-                            tokens = upNextTokens,
-                            backgroundColor = Color(0xFFF8FAFC), // bg-slate-50
-                            borderColor = Color(0xFFE2E8F0), // border-slate-200
-                            showServices = settings?.services ?: true,
-                            autoSlide = settings?.autoSlide ?: true,
-                            isServing = false
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Enhanced Footer
-            EnhancedFooter(
-                isStale = isStale,
-                lastSync = lastSync
-            )
-        }
-    }
-}
-
-@Composable
-fun EnhancedHeader(
-    outletName: String,
-    location: String,
-    currentTime: Date,
-    timeFormat: SimpleDateFormat,
-    dateFormat: SimpleDateFormat,
-    totalWaiting: Int,
-    serving: Int,
-    availableOfficers: Int,
-    isStale: Boolean
-) {
-    // Match web dashboard header layout exactly - TV optimized
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // Top Row: Outlet info, Date/Time, Status cards
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Outlet Info (Left) - matches web grid-cols-1 md:grid-cols-2 2xl:grid-cols-3
-            Column(modifier = Modifier.weight(1.5f)) {
-                Text(
-                    text = outletName,
-                    color = Slate900,
-                    fontSize = 28.sp, // Reduced for TV screens
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.5).sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = location,
-                    color = Slate600,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 2.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            
-            // Date/Time Card (Center) - matches web dashboard styling
-            Card(
-                modifier = Modifier.wrapContentWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)) // border-slate-200
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Date section
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.DateRange, 
-                            contentDescription = null, 
-                            tint = Sky400, 
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = dateFormat.format(currentTime),
-                            color = Slate700,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    
-                    // Divider
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(20.dp)
-                            .background(Color(0xFFE2E8F0)) // border-slate-200
-                    )
-                    
-                    // Time section
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Schedule, 
-                            contentDescription = null, 
-                            tint = Emerald400, 
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = timeFormat.format(currentTime),
-                            color = Slate700,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-            
-            // Status Cards (Right) - exact match to web dashboard
             Row(
-                modifier = Modifier.weight(2f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(responsiveDp(10.dp, scale))
             ) {
-                // Waiting Card - matches web bg-emerald-50 border-emerald-200
-                WebStyleStatCard(
-                    label = "Waiting",
-                    value = totalWaiting.toString(),
-                    backgroundColor = Color(0xFFECFDF5), // bg-emerald-50
-                    borderColor = Color(0xFFA7F3D0), // border-emerald-200  
-                    textColor = Color(0xFF047857), // text-emerald-700
-                    modifier = Modifier.weight(1f)
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color(0xFF6366F1),
+                    modifier = Modifier.size(responsiveDp(34.dp, scale))
                 )
-                
-                // Serving Card - matches web bg-sky-50 border-sky-200
-                WebStyleStatCard(
-                    label = "Serving", 
-                    value = serving.toString(),
-                    backgroundColor = Color(0xFFF0F9FF), // bg-sky-50
-                    borderColor = Color(0xFFBAE6FD), // border-sky-200
-                    textColor = Color(0xFF0369A1), // text-sky-700
-                    modifier = Modifier.weight(1f)
-                )
-                
-                // Counters Card - matches web bg-indigo-50 border-indigo-200  
-                WebStyleStatCard(
-                    label = "Counters",
-                    value = availableOfficers.toString(),
-                    backgroundColor = Color(0xFFF0F0FF), // bg-indigo-50
-                    borderColor = Color(0xFFC7D2FE), // border-indigo-200
-                    textColor = Color(0xFF4338CA), // text-indigo-700
-                    modifier = Modifier.weight(1f)
+                Text(
+                    text = "Now Serving",
+                    color = Color(0xFF1F2937),
+                    fontSize = responsiveSp(36, scale),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = WebDisplayFont
                 )
             }
-        }
-        
-        // Connection status indicator (if stale)
-        if (isStale) {
-            Card(
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFF6B6B).copy(alpha = 0.1f)),
-                border = BorderStroke(1.dp, Color(0xFFFF6B6B).copy(alpha = 0.3f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+
+            Spacer(modifier = Modifier.height(responsiveDp(12.dp, scale)))
+
+            if (tokens.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFFF8FAFC), RoundedCornerShape(responsiveDp(20.dp, scale))),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFFF6B6B),
-                        modifier = Modifier.size(16.dp)
-                    )
                     Text(
-                        text = "CONNECTION LOST - Data may be outdated",
-                        color = Color(0xFFFF6B6B),
-                        fontSize = 12.sp,
+                        text = "No active tokens",
+                        color = Color(0xFF94A3B8),
+                        fontSize = responsiveSp(24, scale),
                         fontWeight = FontWeight.Medium
                     )
                 }
+            } else {
+                val columns = when (tokens.size) {
+                    1 -> 1
+                    2 -> 2
+                    else -> 4
+                }
+
+                if (columns == 4) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, scale))
+                    ) {
+                        tokens.take(4).forEach { token ->
+                            NowServingCard(
+                                modifier = Modifier.weight(1f),
+                                token = token,
+                                scale = scale
+                            )
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, scale))
+                    ) {
+                        tokens.take(columns).forEach { token ->
+                            NowServingCard(
+                                modifier = Modifier.weight(1f),
+                                token = token,
+                                scale = scale
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun WebStyleStatCard(
-    label: String,
-    value: String,
-    backgroundColor: Color,
-    borderColor: Color,
-    textColor: Color,
-    modifier: Modifier = Modifier
+private fun NowServingCard(
+    modifier: Modifier,
+    token: Token,
+    scale: Float
 ) {
-    // Exact replica of web dashboard stat cards - TV optimized
     Card(
-        modifier = modifier.height(70.dp), // Reduced height for TV
-        shape = RoundedCornerShape(12.dp), // Slightly smaller radius
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        border = BorderStroke(1.dp, borderColor),
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(responsiveDp(24.dp, scale)),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = responsiveDp(8.dp, scale))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0xFF1E1B4B), Color(0xFF312E81))
+                    )
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(6f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "Token",
+                    color = Color(0xFFA5B4FC),
+                    fontSize = responsiveSp(12, scale),
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = WebDisplayFont,
+                    letterSpacing = responsiveSp(1, scale)
+                )
+                Text(
+                    text = token.tokenNumber.toString(),
+                    color = Color.White,
+                    fontSize = responsiveSp(74, scale),
+                    fontWeight = FontWeight.Black,
+                    fontFamily = WebDisplayFont,
+                    letterSpacing = responsiveSp(-1, scale)
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .weight(4f)
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.06f)),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Counter ${token.counterNumber ?: 0}",
+                    color = Color(0xFFFACC15),
+                    fontSize = responsiveSp(36, scale),
+                    fontWeight = FontWeight.Black,
+                    fontFamily = WebDisplayFont
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromoVideoPanel(
+    modifier: Modifier,
+    videoId: String,
+    scale: Float
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(responsiveDp(40.dp, scale)),
+        border = BorderStroke(responsiveDp(4.dp, scale), Color(0xFFF1F5F9)),
+        colors = CardDefaults.cardColors(containerColor = Color.Black),
+        elevation = CardDefaults.cardElevation(defaultElevation = responsiveDp(8.dp, scale))
+    ) {
+        if (videoId.isBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0F172A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color(0xFF475569),
+                        modifier = Modifier.size(responsiveDp(56.dp, scale))
+                    )
+                    Spacer(modifier = Modifier.height(responsiveDp(10.dp, scale)))
+                    Text(
+                        text = "No promotion video configured",
+                        color = Color(0xFF64748B),
+                        fontSize = responsiveSp(14, scale),
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = WebDisplayFont
+                    )
+                }
+            }
+        } else {
+            val fallbackLoopUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+
+            val configuredPlaylist = remember(videoId) { parsePromoMediaUrls(videoId) }
+            val playlist = remember(configuredPlaylist) {
+                if (configuredPlaylist.isNotEmpty()) configuredPlaylist else listOf(fallbackLoopUrl)
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                PlaylistVideoPlayer(
+                    mediaUrls = playlist,
+                    scale = scale
+                )
+
+                if (configuredPlaylist.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(vertical = responsiveDp(8.dp, scale), horizontal = responsiveDp(12.dp, scale))
+                    ) {
+                        Text(
+                            text = "No valid direct media URL configured. Playing fallback promo video.",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = responsiveSp(11, scale),
+                            fontFamily = WebDisplayFont,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+@Composable
+private fun PlaylistVideoPlayer(
+    mediaUrls: List<String>,
+    scale: Float
+) {
+    val context = LocalContext.current
+    val appContext = remember(context) { context.applicationContext }
+    val safeUrls = remember(mediaUrls) {
+        mediaUrls.map { it.trim() }.filter { it.isNotEmpty() }
+    }
+    var resolvedUrls by remember(safeUrls) { mutableStateOf(safeUrls) }
+
+    LaunchedEffect(safeUrls) {
+        val firstUrl = safeUrls.firstOrNull()
+        if (safeUrls.size == 1 && firstUrl != null && isDirectMp4Url(firstUrl)) {
+            val cachedFile = withContext(Dispatchers.IO) {
+                downloadPromoVideoToCache(appContext, firstUrl)
+            }
+
+            resolvedUrls = if (cachedFile != null) {
+                listOf(Uri.fromFile(cachedFile).toString())
+            } else {
+                safeUrls
+            }
+        } else {
+            resolvedUrls = safeUrls
+        }
+    }
+
+    val player = remember(resolvedUrls) {
+        ExoPlayer.Builder(appContext)
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        1000,
+                        5000,
+                        250,
+                        500
+                    )
+                    .build()
+            )
+            .build().apply {
+            setMediaItems(resolvedUrls.map { MediaItem.fromUri(it) })
+            repeatMode = if (resolvedUrls.size <= 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_ALL
+            playWhenReady = true
+            volume = 0f
+            prepare()
+        }
+    }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (player.mediaItemCount <= 1) {
+                    player.seekTo(0, 0L)
+                } else {
+                    val next = (player.currentMediaItemIndex + 1) % player.mediaItemCount
+                    player.seekTo(next, 0L)
+                }
+                player.prepare()
+                player.playWhenReady = true
+            }
+        }
+        player.addListener(listener)
+
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    AndroidView(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(responsiveDp(32.dp, scale))),
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                this.player = player
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+            }
+        },
+        update = { view ->
+            view.player = player
+                view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        }
+    )
+}
+
+private fun parsePromoMediaUrls(raw: String): List<String> {
+    if (raw.isBlank()) return emptyList()
+
+    return raw
+        .split(',', '\n', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .mapNotNull { value ->
+            val v = value.lowercase(Locale.US)
+            val isHttp = v.startsWith("http://") || v.startsWith("https://")
+            val isDirect =
+                v.contains(".m3u8") ||
+                    v.contains(".mpd") ||
+                    v.contains(".mp4") ||
+                    v.contains(".webm")
+
+            if (isHttp && isDirect) value else null
+        }
+        .distinct()
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UpNextSidebar(
+    modifier: Modifier,
+    tokens: List<Token>,
+    showService: Boolean,
+    totalWaiting: Int,
+    totalServing: Int,
+    totalCounters: Int,
+    scale: Float
+) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        shape = RoundedCornerShape(responsiveDp(48.dp, scale)),
+        border = BorderStroke(responsiveDp(4.dp, scale), Color(0x1F1E3A8A)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        elevation = CardDefaults.cardElevation(defaultElevation = responsiveDp(12.dp, scale))
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x801E3A8A))
+                    .padding(horizontal = responsiveDp(24.dp, scale), vertical = responsiveDp(20.dp, scale)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(responsiveDp(10.dp, scale))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ConfirmationNumber,
+                    contentDescription = null,
+                    tint = Color(0xFFC7D2FE),
+                    modifier = Modifier.size(responsiveDp(32.dp, scale))
+                )
+                Text(
+                    text = "Up Next",
+                    color = Color.White,
+                    fontSize = responsiveSp(36, scale),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = WebDisplayFont
+                )
+            }
+
+            if (tokens.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No pending tokens",
+                        color = Color(0xFF64748B),
+                        fontSize = responsiveSp(24, scale),
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = WebDisplayFont
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = responsiveDp(18.dp, scale), vertical = responsiveDp(16.dp, scale)),
+                    verticalArrangement = Arrangement.spacedBy(responsiveDp(12.dp, scale))
+                ) {
+                    itemsIndexed(tokens, key = { _, token -> token.id }) { idx, token ->
+                        val highlighted = idx == 0
+                        Card(
+                            shape = RoundedCornerShape(responsiveDp(28.dp, scale)),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (highlighted) Color.White else Color(0xFF002244)
+                            ),
+                            border = BorderStroke(
+                                responsiveDp(2.dp, scale),
+                                if (highlighted) Color(0xFF0EA5E9) else Color.White.copy(alpha = 0.1f)
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = if (highlighted) responsiveDp(4.dp, scale) else 0.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(responsiveDp(100.dp, scale))
+                                    .padding(horizontal = responsiveDp(16.dp, scale)),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(responsiveDp(16.dp, scale))
+                                ) {
+                                    Text(
+                                        text = token.tokenNumber.toString(),
+                                        color = if (highlighted) Color(0xFF1E1B4B) else Color(0xFFF1F5F9),
+                                        fontSize = responsiveSp(60, scale),
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = WebDisplayFont
+                                    )
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(responsiveDp(4.dp, scale))
+                                    ) {
+                                        if (showService && token.serviceTypes.isNotEmpty()) {
+                                            FlowRow(horizontalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))) {
+                                                token.serviceTypes.forEach { service ->
+                                                    Text(
+                                                        text = service,
+                                                        color = if (highlighted) Color(0xFF4F46E5) else Color(0xFF818CF8),
+                                                        fontSize = responsiveSp(20, scale),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontFamily = WebDisplayFont,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = responsiveDp(8.dp, scale))
+                                        .widthIn(min = responsiveDp(132.dp, scale)),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    if (highlighted) {
+                                        Column(
+                                            horizontalAlignment = Alignment.End,
+                                            verticalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(responsiveDp(6.dp, scale))
+                                            ) {
+                                                Text(
+                                                    text = "QUEUE POSITION",
+                                                    color = Color(0xFF64748B),
+                                                    fontSize = responsiveSp(12, scale),
+                                                    fontWeight = FontWeight.Black,
+                                                    letterSpacing = 0.8.sp,
+                                                    fontFamily = WebDisplayFont
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(responsiveDp(10.dp, scale)))
+                                                        .background(Color(0xFFE2E8F0))
+                                                        .padding(
+                                                            horizontal = responsiveDp(10.dp, scale),
+                                                            vertical = responsiveDp(4.dp, scale)
+                                                        )
+                                                ) {
+                                                    Text(
+                                                        text = "#${idx + 1}",
+                                                        color = Color(0xFF0F172A),
+                                                        fontSize = responsiveSp(22, scale),
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        fontFamily = WebDisplayFont
+                                                    )
+                                                }
+                                            }
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0xFF4F46E5), RoundedCornerShape(999.dp))
+                                                    .padding(horizontal = responsiveDp(12.dp, scale), vertical = responsiveDp(6.dp, scale))
+                                            ) {
+                                                Text(
+                                                    text = "Please Prepare",
+                                                    color = Color.White,
+                                                    fontSize = responsiveSp(12, scale),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = WebDisplayFont,
+                                                    letterSpacing = 0.5.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .padding(responsiveDp(14.dp, scale)),
+                horizontalArrangement = Arrangement.spacedBy(responsiveDp(10.dp, scale))
+            ) {
+                MetricCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Waiting",
+                    value = totalWaiting.toString(),
+                    bg = Color(0x332567B2),
+                    titleColor = Color(0xFFA5B4FC)
+                )
+                MetricCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Serving",
+                    value = totalServing.toString(),
+                    bg = Color(0x3310B981),
+                    titleColor = Color(0xFF6EE7B7)
+                )
+                MetricCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Counters",
+                    value = totalCounters.toString(),
+                    bg = Color(0x331D4ED8),
+                    titleColor = Color(0xFF93C5FD)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricCard(
+    modifier: Modifier,
+    title: String,
+    value: String,
+    bg: Color,
+    titleColor: Color,
+    scale: Float = 1f
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(responsiveDp(16.dp, scale)),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        border = BorderStroke(responsiveDp(1.dp, scale), titleColor.copy(alpha = 0.2f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp), // Reduced padding
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // Label text - matches web text-[10px] font-black uppercase tracking-widest opacity-70  
-            Text(
-                text = label.uppercase(),
-                color = textColor.copy(alpha = 0.7f),
-                fontSize = 9.sp, // Slightly smaller for TV
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp, // Reduced letter spacing
-                textAlign = TextAlign.Center,
-                lineHeight = 10.sp
-            )
-            
-            Spacer(modifier = Modifier.height(2.dp))
-            
-            // Value text - matches web font-black text-slate-900 with dynamic fontSize
-            Text(
-                text = value,
-                color = Slate900,
-                fontSize = 20.sp, // Reduced for TV layout
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-@Composable
-fun StatCard(label: String, value: String, color: Color) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(2.dp),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .fillMaxWidth()
+                .padding(vertical = responsiveDp(10.dp, scale)),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = label.uppercase(),
-                color = Slate400,
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp,
-                textAlign = TextAlign.Center
+                text = title.uppercase(),
+                color = titleColor,
+                fontSize = responsiveSp(10, scale),
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = WebDisplayFont,
+                letterSpacing = responsiveSp(1, scale)
             )
             Text(
                 text = value,
-                color = color,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
+                color = Color.White,
+                fontSize = responsiveSp(36, scale),
+                fontWeight = FontWeight.Bold,
+                fontFamily = WebDisplayFont,
                 textAlign = TextAlign.Center
             )
-        }
-    }
-}
-
-@Composable
-fun NoticeBar(notice: Notice, isCritical: Boolean) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isCritical) Color(0xFFFF6B6B).copy(alpha = 0.1f) else Emerald50
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, 
-            if (isCritical) Color(0xFFFF6B6B).copy(alpha = 0.3f) else Emerald200
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                if (isCritical) Icons.Default.Warning else Icons.Default.Info,
-                contentDescription = null,
-                tint = if (isCritical) Color(0xFFFF6B6B) else Emerald600,
-                modifier = Modifier.size(20.dp)
-            )
-            Column {
-                Text(
-                    text = notice.title,
-                    color = if (isCritical) Color(0xFFFF6B6B) else Emerald700,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                if (notice.message.isNotEmpty()) {
-                    Text(
-                        text = notice.message,
-                        color = if (isCritical) Color(0xFFFF6B6B).copy(alpha = 0.8f) else Emerald600,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun EnhancedFooter(isStale: Boolean, lastSync: Long) {
-    val slTimeZone = TimeZone.getTimeZone("GMT+05:30")
-    val syncTimeFormat = remember { 
-        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = slTimeZone } 
-    }
-    
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.8f))
-    ) {
-        Column(
-            modifier = Modifier.padding(4.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            
-            // Bottom Row: Centered Text with Logos and Status
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(-2.dp)
-            ) {
-                // Logo row with left and right alignment, centered text
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left: SLT Logo
-                    Image(
-                        painter = painterResource(id = R.drawable.logo),
-                        contentDescription = "SLT-Mobitel Logo",
-                        modifier = Modifier.height(32.dp).padding(vertical = 2.dp)
-                    )
-                    
-                    // Center: Platform Title
-                    Text(
-                        text = "Digital Queue Management Platform",
-                        color = Slate800,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    
-                    // Right: Transzent Logo
-                    Image(
-                        painter = painterResource(id = R.drawable.transzent_logo),
-                        contentDescription = "Transzent Logo",
-                        modifier = Modifier.height(36.dp).padding(vertical = 2.dp)
-                    )
-                }
-                
-                // Centered Copyright Text
-                Text(
-                    text = "© 2026 SLT-Mobitel Digital Platforms Section",
-                    color = Slate500,
-                    fontSize = 10.sp,
-                    textAlign = TextAlign.Center
-                )
-                
-                // Status Row (centered)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (lastSync > 0) {
-                        Text(
-                            text = "Last update: ${syncTimeFormat.format(Date(lastSync))}",
-                            color = Slate500,
-                            fontSize = 10.sp
-                        )
-                    }
-                    
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(
-                                    if (isStale) Color(0xFFFF6B6B) else Emerald500,
-                                    CircleShape
-                                )
-                        )
-                        Text(
-                            text = if (isStale) "OFFLINE" else "LIVE",
-                            color = if (isStale) Color(0xFFFF6B6B) else Emerald500,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// NEW WEB-IDENTICAL COMPONENTS
-
-@Composable
-fun WebStyleContentCard(
-    modifier: Modifier = Modifier,
-    title: String,
-    icon: ImageVector,
-    content: @Composable () -> Unit
-) {
-    // Exact replica of web dashboard content cards: rounded-3xl border shadow-sm bg-white border-slate-200
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp), // rounded-3xl = 24dp
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)), // border-slate-200
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp) // shadow-sm
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp) // p-2 sm:p-4 equivalent
-        ) {
-            // Header with icon and title - matches web exactly
-            Row(
-                modifier = Modifier.padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (title == "Now Serving") Emerald400 else Sky400,
-                    modifier = Modifier.size(20.dp) // w-5 h-5
-                )
-                Text(
-                    text = title,
-                    color = Slate900,
-                    fontSize = 18.sp, // text-base sm:text-lg md:text-xl
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            
-            // Content area
-            Box(modifier = Modifier.weight(1f)) {
-                content()
-            }
-        }
-    }
-}
-
-@Composable 
-fun WebStyleTokenList(
-    tokens: List<Token>,
-    backgroundColor: Color,
-    borderColor: Color,
-    showServices: Boolean,
-    autoSlide: Boolean,
-    isServing: Boolean
-) {
-    if (tokens.isEmpty()) return
-    
-    // Horizontal scrolling token list - matches web marquee
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
-    ) {
-        items(tokens) { token ->
-            WebStyleTokenCard(
-                token = token,
-                backgroundColor = backgroundColor,
-                borderColor = borderColor,
-                showService = showServices,
-                isServing = isServing
-            )
-        }
-    }
-}
-
-@Composable
-fun WebStyleTokenCard(
-    token: Token,
-    backgroundColor: Color,
-    borderColor: Color, 
-    showService: Boolean,
-    isServing: Boolean
-) {
-    // Exact replica of web token cards with proper sizing
-    Card(
-        modifier = Modifier
-            .width(200.dp) // w-[min(72vw,230px)] equivalent
-            .height(80.dp),
-        shape = RoundedCornerShape(12.dp), // rounded-xl
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        border = BorderStroke(1.dp, borderColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp) // shadow-sm
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp), // py-2 px-3
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                // Header row with queue position or service info
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isServing) "Serving" else "Queue",
-                        color = if (isServing) Color(0xFF059669) else Color(0xFF475569), // emerald-700 : slate-700
-                        fontSize = 10.sp, // text-[12px]
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.alpha(0.8f) // opacity-80
-                    )
-                    
-                    if (showService && token.serviceTypes?.isNotEmpty() == true) {
-                        Card(
-                            shape = RoundedCornerShape(6.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = BorderStroke(1.dp, Color(0xFFDEEFFE)), // border-sky-100
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                        ) {
-                            Text(
-                                text = token.serviceTypes?.firstOrNull()?.take(8) ?: "",
-                                color = Color(0xFF0284C7), // text-sky-600
-                                fontSize = 9.sp, // text-[11px]
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(4.dp))
-                
-                // Token number - matches web styling
-                Text(
-                    text = String.format("%03d", token.tokenNumber), // padStart(3, "0")
-                    color = Slate900,
-                    fontSize = 20.sp, // clamp(1.2rem, 8vw, 2.5rem)
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp // tracking-wider
-                )
-            }
         }
     }
 }

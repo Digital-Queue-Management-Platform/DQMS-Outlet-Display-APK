@@ -368,27 +368,24 @@ class EnhancedAudioManager private constructor(
         if (announcement.customText != null) {
             return announcement.customText
         }
-        
+
         val resources = context.resources
+        val token = announcement.tokenNumber
+        val counter = announcement.counterNumber?.toString() ?: "counter"
+
         return when (announcement.eventType) {
             "TOKEN_CALLED" -> {
                 when (announcement.lang) {
-                    "si" -> resources.getString(R.string.announcement_token_called, 
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)
-                    "ta" -> resources.getString(R.string.announcement_token_called,
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)  
-                    else -> resources.getString(R.string.announcement_token_called,
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)
+                    "si" -> "ටෝකන් අංක $token, කරුණාකර කවුන්ටරය $counter වෙත පැමිණෙන්න."
+                    "ta" -> "டோக்கன் எண் $token, தயவுசெய்து கவுண்டர் $counter க்கு செல்லவும்."
+                    else -> "Token number $token, please proceed to counter $counter."
                 }
             }
             "TOKEN_RECALLED" -> {
                 when (announcement.lang) {
-                    "si" -> resources.getString(R.string.announcement_token_recalled,
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)
-                    "ta" -> resources.getString(R.string.announcement_token_recalled,
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)
-                    else -> resources.getString(R.string.announcement_token_recalled,
-                        announcement.firstName, announcement.tokenNumber, announcement.counterNumber)
+                    "si" -> "ටෝකන් අංක $token නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
+                    "ta" -> "டோக்கன் எண் $token மீண்டும் அழைக்கப்படுகிறது. உடனடியாக கவுண்டர் $counter க்கு வரவும்."
+                    else -> "Token number $token is being recalled. Please proceed to counter $counter immediately."
                 }
             }
             "TEST_SOUND" -> {

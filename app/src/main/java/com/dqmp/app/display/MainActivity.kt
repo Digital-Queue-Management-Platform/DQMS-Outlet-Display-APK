@@ -1,6 +1,8 @@
 package com.dqmp.app.display
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
@@ -17,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -36,6 +40,10 @@ import com.dqmp.app.display.ui.theme.Emerald500
 import com.dqmp.app.display.ui.theme.Slate900
 import com.dqmp.app.display.viewmodel.DisplayState
 import com.dqmp.app.display.viewmodel.DisplayViewModel
+import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
@@ -43,11 +51,19 @@ class MainActivity : ComponentActivity() {
     private var lastBackPressTime = 0L
     private var menuPressCount = 0
     private var lastMenuPressTime = 0L
+    private val recentAudioEvents = ConcurrentHashMap<String, Long>()
+    private val recentTokenSpeech = ConcurrentHashMap<String, Long>()
     
     // Professional components
     private var displayViewModel: DisplayViewModel? = null
     private var configurationManager: ConfigurationManager? = null
     private var audioManager: ProfessionalAudioManager? = null
+    private val ttsHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
 
     override fun onDestroy() {
         tts?.stop()
@@ -74,6 +90,13 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.setLanguage(java.util.Locale.US)
+                tts?.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+                tts?.setSpeechRate(0.95f)
             }
         }
         
@@ -176,40 +199,45 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     viewModel.announcementEvent.collect { event ->
                         Log.d("DQMP_AUDIO", "MainActivity caught announcement event: ${event.eventType}")
+
+                        val normalizedLang = normalizeAnnouncementLanguage(event.preferredLanguage)
+                        val dedupeKey = "${event.eventType}|${event.tokenNumber}|${event.counterNumber}|$normalizedLang|${event.customText}".lowercase()
+                        val speechKey = "${event.tokenNumber}|${event.counterNumber}|$normalizedLang".lowercase()
+                        val nowMs = System.currentTimeMillis()
+                        recentAudioEvents.entries.removeIf { nowMs - it.value > 3500L }
+                        recentTokenSpeech.entries.removeIf { nowMs - it.value > 8000L }
+                        val seenAt = recentAudioEvents[dedupeKey]
+                        if (seenAt != null && (nowMs - seenAt) < 3500L) {
+                            Log.d("DQMP_AUDIO", "⏭️ Skipping duplicate audio event: $dedupeKey")
+                            return@collect
+                        }
+
+                        val recentSpeechAt = recentTokenSpeech[speechKey]
+                        if (recentSpeechAt != null && (nowMs - recentSpeechAt) < 8000L) {
+                            Log.d("DQMP_AUDIO", "⏭️ Skipping duplicate token speech: $speechKey")
+                            return@collect
+                        }
+
+                        recentAudioEvents[dedupeKey] = nowMs
+                        recentTokenSpeech[speechKey] = nowMs
                         
                         // Get current display settings to check if announcements are enabled
                         val currentState = viewModel.state.value
                         val playTone = (currentState as? DisplayState.Success)?.data?.displaySettings?.playTone ?: true
+                        val chimeVolumePercent = (event.chimeVolume ?: 100).coerceIn(0, 100)
+                        val voiceVolumePercent = (event.voiceVolume ?: 300).coerceIn(0, 300)
+                        val shouldPlayChime = playTone || event.eventType == "TEST_CHIME"
                         
                         // 1. Play Chime (if enabled) - EXACTLY like web dashboard
-                        if (playTone) {
+                        if (shouldPlayChime) {
                             try {
-                                val mp = MediaPlayer.create(this@MainActivity, R.raw.announcement)
-                                mp?.let { player ->
-                                    // Set audio attributes for media playback
-                                    player.setAudioAttributes(
-                                        android.media.AudioAttributes.Builder()
-                                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                            .build()
-                                    )
-                                    
-                                    // Set volume to maximum
-                                    player.setVolume(1.0f, 1.0f)
-                                    
-                                    // Get the actual duration of the chime
-                                    val chimeDuration = player.duration
-                                    Log.d("DQMP_AUDIO", "🔊 Playing announcement chime (duration: ${chimeDuration}ms)")
-                                    
-                                    player.setOnCompletionListener { 
-                                        Log.d("DQMP_AUDIO", "✅ Chime playback completed")
-                                        it.release() 
-                                    }
-                                    player.start()
-                                    
-                                    // Wait for chime to finish + 200ms pause (like web dashboard)
-                                    delay(chimeDuration.toLong() + 200L)
-                                } ?: Log.e("DQMP_AUDIO", "❌ Failed to create MediaPlayer for announcement chime")
+                                val played = withTimeoutOrNull(5000L) {
+                                    playAnnouncementChime(chimeVolumePercent)
+                                } ?: false
+                                if (!played) {
+                                    Log.w("DQMP_AUDIO", "⚠️ Chime did not complete cleanly before timeout")
+                                }
+                                delay(200L)
                             } catch (e: Exception) { 
                                 Log.e("DQMP_AUDIO", "❌ Announcement chime error: ${e.message}", e) 
                             }
@@ -218,9 +246,8 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         // 2. Build Phrase based on language and event type - EXACTLY like web dashboard
-                        val lang = event.preferredLanguage?.lowercase() ?: "en"
+                        val lang = normalizedLang
                         val isRecall = event.eventType == "RECALL"
-                        val firstName = event.customerName?.split(" ")?.firstOrNull() ?: ""
                         val num = event.tokenNumber
                         val counter = event.counterNumber ?: "?"
                         
@@ -235,19 +262,19 @@ class MainActivity : ComponentActivity() {
                             "CONFIG_SUCCESS" -> "" // Just ding, no TTS for configuration success
                             else -> when (lang) {
                                 "si", "sinhala" -> if (isRecall) {
-                                    "$firstName. ටෝකන් අංක $num නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටරය $counter වෙත පැමිණෙන්න."
+                                    "ටෝකන් අංක $num නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
                                 } else {
-                                    "$firstName. ටෝකන් අංක $num, කරුණාකර කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
+                                    "ටෝකන් අංක $num, කරුණාකර කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
                                 }
                                 "ta", "tamil" -> if (isRecall) {
-                                    "$firstName. அடையாள எண் $num மீண்டும் அழைக்கப்படுகிறது. உடனடியாக கவுண்டர் $counter க்கு வரவும்."
+                                    "அடையாள எண் $num மீண்டும் அழைக்கப்படுகிறது. உடனடியாக கவுண்டர் $counter க்கு வரவும்."
                                 } else {
-                                    "$firstName. அடையாள எண் $num, தயவுசெய்து கவுண்டர் எண் $counter க்கு செல்லவும்."
+                                    "அடையாள எண் $num, தயவுசெய்து கவுண்டர் எண் $counter க்கு செல்லவும்."
                                 }
                                 else -> if (isRecall) {
-                                    "$firstName. Token number $num is being recalled. Please proceed to counter number $counter immediately."
+                                    "Token number $num is being recalled. Please proceed to counter number $counter immediately."
                                 } else {
-                                    "$firstName. Token number $num, please proceed to counter number $counter."
+                                    "Token number $num, please proceed to counter number $counter."
                                 }
                             }
                         }
@@ -258,7 +285,7 @@ class MainActivity : ComponentActivity() {
                                 ?: SettingsRepository.DEFAULT_URL
                             
                             Log.d("DQMP_AUDIO", "Announcement Triggered: Type=$isRecall, Language=$lang, Phrase=$phrase")
-                            speakBackend(baseUrl, phrase, lang)
+                            speakBackend(baseUrl, phrase, lang, voiceVolumePercent)
                         } else {
                             Log.d("DQMP_AUDIO", "Skipping TTS for event type: ${event.eventType}")
                         }
@@ -268,26 +295,167 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun speakBackend(baseUrl: String, text: String, lang: String) {
+    private fun speakBackend(baseUrl: String, text: String, lang: String, voiceVolumePercent: Int = 300) {
         val sanitizedUrl = baseUrl.removeSuffix("/")
         try {
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
-            val ttsUrl = "$sanitizedUrl/tts/speak?text=$encodedText&lang=$lang"
-            
-            Log.d("DQMP_AUDIO", "Streaming TTS from: $ttsUrl")
-            val mp = MediaPlayer()
-            mp.setDataSource(ttsUrl)
-            mp.setOnPreparedListener { it.start() }
-            mp.setOnCompletionListener { it.release() }
-            mp.setOnErrorListener { _, _, _ -> 
-                Log.e("DQMP_AUDIO", "Backend TTS Stream failed. Falling back.")
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
-                true 
-            }
-            mp.prepareAsync()
+            val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
+            val ttsUrl = "$ttsBase/tts/speak?text=$encodedText&lang=$lang&gender=female"
+
+            // Use fully fetched audio for reliability; streaming can cut long Sinhala/Tamil recalls.
+            Log.d("DQMP_AUDIO", "Playing fetched backend TTS from: $ttsUrl")
+            playFetchedTts(ttsUrl, voiceVolumePercent, text, lang)
         } catch (e: Exception) {
             Log.e("DQMP_AUDIO", "Failed to setup backend TTS player", e)
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+            val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
+            val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
+            val ttsUrl = "$ttsBase/tts/speak?text=$encodedText&lang=$lang&gender=female"
+            playFetchedTts(ttsUrl, voiceVolumePercent, text, lang)
+        }
+    }
+
+    private fun playFetchedTts(ttsUrl: String, voiceVolumePercent: Int, text: String, lang: String) {
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val request = Request.Builder().url(ttsUrl).build()
+                ttsHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("Fetched TTS failed with status ${response.code}")
+                    }
+
+                    val audioBytes = response.body?.bytes()
+                        ?: throw IllegalStateException("Fetched TTS returned empty body")
+
+                    val tempFile = File.createTempFile("dqmp_tts_", ".mp3", cacheDir)
+                    tempFile.writeBytes(audioBytes)
+
+                    launch(kotlinx.coroutines.Dispatchers.Main) {
+                        try {
+                            val mp = MediaPlayer()
+                            mp.setAudioAttributes(
+                                android.media.AudioAttributes.Builder()
+                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                    .build()
+                            )
+                            mp.setDataSource(tempFile.absolutePath)
+                            mp.setOnPreparedListener {
+                                val normalized = (voiceVolumePercent.coerceIn(0, 300) / 300f).coerceIn(0f, 1f)
+                                it.setVolume(normalized, normalized)
+                                it.start()
+                                Log.d("DQMP_AUDIO", "Voice announcement started via fetched TTS")
+                            }
+                            mp.setOnCompletionListener {
+                                it.release()
+                                tempFile.delete()
+                                Log.d("DQMP_AUDIO", "Voice announcement completed via fetched TTS")
+                            }
+                            mp.setOnErrorListener { player, what, extra ->
+                                Log.e("DQMP_AUDIO", "Fetched TTS playback failed (error: $what, $extra). Falling back to device TTS.")
+                                player.release()
+                                tempFile.delete()
+                                configureFallbackTtsLanguage(lang)
+                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                                true
+                            }
+                            mp.prepareAsync()
+                        } catch (playError: Exception) {
+                            Log.e("DQMP_AUDIO", "Fetched TTS setup failed", playError)
+                            tempFile.delete()
+                            configureFallbackTtsLanguage(lang)
+                            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                        }
+                    }
+                }
+            } catch (fetchError: Exception) {
+                Log.e("DQMP_AUDIO", "Fetched TTS request failed", fetchError)
+                launch(kotlinx.coroutines.Dispatchers.Main) {
+                    configureFallbackTtsLanguage(lang)
+                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                }
+            }
+        }
+    }
+
+    private fun configureFallbackTtsLanguage(lang: String) {
+        val ttsInstance = tts ?: return
+        val locale = when (lang.lowercase()) {
+            "si", "sinhala" -> java.util.Locale("si", "LK")
+            "ta", "tamil" -> java.util.Locale("ta", "LK")
+            else -> java.util.Locale.US
+        }
+
+        val result = ttsInstance.setLanguage(locale)
+        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+            Log.w("DQMP_AUDIO", "Fallback TTS language $lang not supported, using US English")
+            ttsInstance.setLanguage(java.util.Locale.US)
+        }
+    }
+
+    private fun normalizeAnnouncementLanguage(raw: String?): String {
+        return when (raw?.trim()?.lowercase()) {
+            "si", "sinhala", "sinhalese" -> "si"
+            "ta", "tamil" -> "ta"
+            "en", "english" -> "en"
+            else -> "en"
+        }
+    }
+
+    private suspend fun playAnnouncementChime(chimeVolumePercent: Int): Boolean {
+        return suspendCancellableCoroutine { continuation ->
+            try {
+                val player = MediaPlayer.create(this@MainActivity, R.raw.announcement)
+                if (player == null) {
+                    Log.e("DQMP_AUDIO", "❌ Failed to create MediaPlayer for announcement chime")
+                    continuation.resume(false)
+                    return@suspendCancellableCoroutine
+                }
+
+                player.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+
+                val chimeVolume = (chimeVolumePercent / 100f).coerceIn(0f, 1f)
+                player.setVolume(chimeVolume, chimeVolume)
+
+                var completed = false
+                fun finish(ok: Boolean) {
+                    if (completed) return
+                    completed = true
+                    try {
+                        player.release()
+                    } catch (_: Exception) {
+                    }
+                    continuation.resume(ok)
+                }
+
+                player.setOnCompletionListener {
+                    Log.d("DQMP_AUDIO", "✅ Chime playback completed")
+                    finish(true)
+                }
+
+                player.setOnErrorListener { _, what, extra ->
+                    Log.e("DQMP_AUDIO", "❌ Chime playback error: $what, $extra")
+                    finish(false)
+                    true
+                }
+
+                continuation.invokeOnCancellation {
+                    try {
+                        player.release()
+                    } catch (_: Exception) {
+                    }
+                }
+
+                Log.d("DQMP_AUDIO", "🔊 Playing announcement chime")
+                player.start()
+            } catch (e: Exception) {
+                Log.e("DQMP_AUDIO", "❌ Failed during chime playback setup", e)
+                continuation.resume(false)
+            }
         }
     }
 
