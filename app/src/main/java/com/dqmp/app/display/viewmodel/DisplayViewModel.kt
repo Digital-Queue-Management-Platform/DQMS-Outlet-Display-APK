@@ -12,9 +12,16 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -87,8 +94,9 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     // For audio announcements
     private val _announcementEvent = MutableSharedFlow<TokenCallEvent>(replay = 0)
     val announcementEvent = _announcementEvent.asSharedFlow()
-    private var lastAnnouncedTokenId: String? = null
-    private var lastAnnouncedCounter: Int? = null
+    private var lastAnnouncedEventKey: String? = null
+    private var lastLiveAudioAnnouncementKey: String? = null
+    private var lastLiveAudioAnnouncementAt: Long = 0L
 
     // Simplified production-stable approach
     // HTTP polling ONLY (no WebSocket complexity)
@@ -489,18 +497,34 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     
                     // --- Audio Announcement Logic ---
                     val currentToken = data.inService.firstOrNull()
-                    if (currentToken != null && (currentToken.id != lastAnnouncedTokenId || currentToken.counterNumber != lastAnnouncedCounter)) {
-                        Log.d("DQMP_AUDIO", "New token call: ${currentToken.tokenNumber}")
-                        _announcementEvent.emit(
-                            TokenCallEvent(
-                                tokenNumber = currentToken.tokenNumber.toString(),
-                                counterNumber = currentToken.counterNumber,
-                                customerName = currentToken.customer?.name,
-                                preferredLanguage = currentToken.customer?.preferredLanguage ?: "en"
-                            )
-                        )
-                        lastAnnouncedTokenId = currentToken.id
-                        lastAnnouncedCounter = currentToken.counterNumber
+                    if (currentToken != null) {
+                        val fallbackAnnouncementKey = "${currentToken.tokenNumber}|${currentToken.counterNumber}|${(currentToken.customer?.preferredLanguage ?: "en").lowercase()}"
+                        val nowMs = System.currentTimeMillis()
+                        val recentlyAnnouncedByLiveAudio =
+                            lastLiveAudioAnnouncementKey == fallbackAnnouncementKey &&
+                            (nowMs - lastLiveAudioAnnouncementAt) < 20_000L
+
+                        if (recentlyAnnouncedByLiveAudio) {
+                            Log.d("DQMP_AUDIO", "Skipping fallback duplicate; live audio already announced key=$fallbackAnnouncementKey")
+                        } else {
+                            // Include calledAt marker from recentlyCalled to allow announcing same token again on recall.
+                            val callMarker = data.recentlyCalled.firstOrNull { it.id == currentToken.id }?.calledAt ?: ""
+                            val eventKey = "${currentToken.id}|${currentToken.counterNumber}|$callMarker"
+                            if (eventKey == lastAnnouncedEventKey) {
+                                // Same token/counter/call marker seen already, skip duplicate fallback announcement.
+                            } else {
+                                Log.d("DQMP_AUDIO", "New token call: ${currentToken.tokenNumber}")
+                                _announcementEvent.emit(
+                                    TokenCallEvent(
+                                        tokenNumber = currentToken.tokenNumber.toString(),
+                                        counterNumber = currentToken.counterNumber,
+                                        customerName = currentToken.customer?.name,
+                                        preferredLanguage = currentToken.customer?.preferredLanguage ?: "en"
+                                    )
+                                )
+                                lastAnnouncedEventKey = eventKey
+                            }
+                        }
                     }
                     
                     // Only update UI state if data actually changed (performance optimization)
@@ -721,16 +745,26 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     val counterNumber = event.tokenData?.counterNumber ?: 0
                     val customerName = event.tokenData?.customerName ?: ""
                     
+                    val normalizedEventType = if ((event.testType ?: "").contains("recall", ignoreCase = true)) {
+                        "RECALL"
+                    } else {
+                        "CALL"
+                    }
+
                     val announcement = TokenCallEvent(
                         tokenNumber = tokenNumber,
                         counterNumber = counterNumber,
                         customerName = customerName,
                         preferredLanguage = event.lang ?: "en",
-                        eventType = "CALL", // This will trigger chime + voice
+                        eventType = normalizedEventType,
                         customText = null,
                         chimeVolume = event.chimeVolume,
                         voiceVolume = event.voiceVolume
                     )
+
+                    val liveKey = "$tokenNumber|$counterNumber|${(event.lang ?: "en").lowercase()}"
+                    lastLiveAudioAnnouncementKey = liveKey
+                    lastLiveAudioAnnouncementAt = System.currentTimeMillis()
                     
                     Log.i("DQMP_AUDIO", "🔊 EMITTING TOKEN_CALLED EVENT - Customer: $customerName, Token: $tokenNumber, Counter: $counterNumber")
                     _announcementEvent.emit(announcement)
@@ -758,10 +792,31 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
 
 @Serializable
 data class TokenData(
+    @Serializable(with = StringOrNumberSerializer::class)
     val tokenNumber: String = "",
     val counterNumber: Int = 0,
     val customerName: String = ""
 )
+
+object StringOrNumberSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("StringOrNumber", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String {
+        if (decoder is JsonDecoder) {
+            val element = decoder.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                return element.content
+            }
+            return element.toString()
+        }
+        return decoder.decodeString()
+    }
+
+    override fun serialize(encoder: Encoder, value: String) {
+        encoder.encodeString(value)
+    }
+}
 
 // Data classes for HTTP polling
 @Serializable 

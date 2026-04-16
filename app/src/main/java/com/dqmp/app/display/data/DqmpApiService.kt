@@ -5,6 +5,7 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Body
+import kotlin.jvm.JvmSuppressWildcards
 
 import retrofit2.Response
 
@@ -31,6 +32,6 @@ interface DqmpApiService {
     @POST("api/teleshop-manager/audio-events/{outletId}/ack")
     suspend fun acknowledgeAudioEvents(
         @Path("outletId") outletId: String,
-        @Body eventIds: Map<String, Any>
-    ): Response<Map<String, Any>>
+        @Body eventIds: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
 }

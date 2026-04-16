@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
     private var menuPressCount = 0
     private var lastMenuPressTime = 0L
     private val recentAudioEvents = ConcurrentHashMap<String, Long>()
+    private val recentTokenSpeech = ConcurrentHashMap<String, Long>()
     
     // Professional components
     private var displayViewModel: DisplayViewModel? = null
@@ -200,14 +201,24 @@ class MainActivity : ComponentActivity() {
                         Log.d("DQMP_AUDIO", "MainActivity caught announcement event: ${event.eventType}")
 
                         val dedupeKey = "${event.eventType}|${event.tokenNumber}|${event.counterNumber}|${event.preferredLanguage}|${event.customText}".lowercase()
+                        val speechKey = "${event.tokenNumber}|${event.counterNumber}|${event.preferredLanguage}".lowercase()
                         val nowMs = System.currentTimeMillis()
                         recentAudioEvents.entries.removeIf { nowMs - it.value > 3500L }
+                        recentTokenSpeech.entries.removeIf { nowMs - it.value > 8000L }
                         val seenAt = recentAudioEvents[dedupeKey]
                         if (seenAt != null && (nowMs - seenAt) < 3500L) {
                             Log.d("DQMP_AUDIO", "⏭️ Skipping duplicate audio event: $dedupeKey")
                             return@collect
                         }
+
+                        val recentSpeechAt = recentTokenSpeech[speechKey]
+                        if (recentSpeechAt != null && (nowMs - recentSpeechAt) < 8000L) {
+                            Log.d("DQMP_AUDIO", "⏭️ Skipping duplicate token speech: $speechKey")
+                            return@collect
+                        }
+
                         recentAudioEvents[dedupeKey] = nowMs
+                        recentTokenSpeech[speechKey] = nowMs
                         
                         // Get current display settings to check if announcements are enabled
                         val currentState = viewModel.state.value
