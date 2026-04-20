@@ -215,7 +215,10 @@ fun EnhancedDisplayScreen(
                         scaleY = 1f,
                         transformOrigin = TransformOrigin(0f, 0f)
                     )
-                    .padding(responsiveDp(24.dp, responsiveScale))
+                    .padding(
+                        horizontal = responsiveDp(64.dp, responsiveScale),
+                        vertical = responsiveDp(32.dp, responsiveScale)
+                    )
             ) {
                 WebHeader(
                     outletName = (data.outletMeta?.name ?: "Sri Lanka Telecom").toWebCapitalize(),
