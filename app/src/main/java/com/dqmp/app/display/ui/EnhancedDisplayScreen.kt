@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -157,7 +158,7 @@ fun EnhancedDisplayScreen(
         val responsiveScale = remember(maxWidth, maxHeight, zoomScale) {
             val widthScale = maxWidth.value / 1920f
             val heightScale = maxHeight.value / 1080f
-            minOf(widthScale, heightScale).coerceIn(0.72f, 1.18f) * zoomScale
+            minOf(widthScale, heightScale) * zoomScale
         }
 
         var currentTime by remember { mutableStateOf(Date(System.currentTimeMillis() + clockSkew)) }
@@ -300,7 +301,7 @@ private fun WebHeader(
             .fillMaxWidth()
             .background(Color.White.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             .padding(horizontal = responsiveDp(24.dp, scale), vertical = responsiveDp(12.dp, scale))
-            .height(responsiveDp(110.dp, scale)),
+            .defaultMinSize(minHeight = responsiveDp(110.dp, scale)),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -335,7 +336,7 @@ private fun WebHeader(
                     Text(
                         text = location.uppercase(),
                         color = Color(0xFF4F46E5),
-                        fontSize = responsiveSp(18, scale),
+                        fontSize = responsiveSp(26, scale),
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = WebDisplayFont,
                         letterSpacing = 2.sp,
@@ -384,7 +385,7 @@ private fun WebHeader(
                     Text(
                         text = timeFormat.format(now),
                         color = Color.White,
-                        fontSize = responsiveSp(60, scale),
+                        fontSize = responsiveSp(68, scale),
                         fontWeight = FontWeight.Bold,
                         fontFamily = WebDisplayFont,
                         letterSpacing = (-1).sp
@@ -392,7 +393,7 @@ private fun WebHeader(
                     Text(
                         text = dateFormat.format(now),
                         color = Color(0xFFC7D2FE),
-                        fontSize = responsiveSp(18, scale),
+                        fontSize = responsiveSp(24, scale),
                         fontWeight = FontWeight.Medium,
                         fontFamily = WebDisplayFont
                     )
@@ -901,8 +902,8 @@ private fun UpNextSidebar(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(responsiveDp(100.dp, scale))
-                                    .padding(horizontal = responsiveDp(16.dp, scale)),
+                                    .defaultMinSize(minHeight = responsiveDp(100.dp, scale))
+                                    .padding(vertical = responsiveDp(12.dp, scale), horizontal = responsiveDp(16.dp, scale)),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
