@@ -131,16 +131,10 @@ class ProfessionalAudioManager(
                     
                     override fun onDone(utteranceId: String?) {
                         Log.d("AUDIO_MGR", "TTS completed: $utteranceId")
-                        scope.launch {
-                            onAnnouncementComplete()
-                        }
                     }
                     
                     override fun onError(utteranceId: String?) {
                         Log.e("AUDIO_MGR", "TTS error: $utteranceId")
-                        scope.launch {
-                            onAnnouncementComplete()
-                        }
                     }
                 })
                 
@@ -287,12 +281,20 @@ class ProfessionalAudioManager(
             // Play tone if enabled
             if (settings.playTone && announcement.type != AnnouncementType.AUDIO_TEST) {
                 playNotificationTone()
-                delay(1000) // Wait for tone to finish
+                delay(1200) // Wait for tone to finish (increased for clarity)
             }
             
             // Generate and speak announcement text
             val announcementText = generateAnnouncementText(announcement)
             speakText(announcementText, announcement.preferredLanguage, announcement.id)
+            
+            // Wait for TTS to finish if we can, or use a safe delay
+            // For simplicity and safety across all Android versions, we use a calculated delay 
+            // based on text length + a healthy 1.2s buffer
+            val estimatedDuration = (announcementText.length * 100L) + 1200L
+            delay(estimatedDuration)
+            
+            onAnnouncementComplete()
             
         } catch (e: Exception) {
             Log.e("AUDIO_MGR", "Error processing announcement", e)

@@ -23,6 +23,7 @@ import java.io.IOException
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.collections.LinkedHashSet
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Enhanced Audio Manager that matches the web dashboard announcement system exactly.
@@ -80,6 +81,7 @@ class EnhancedAudioManager private constructor(
     
     // State Management
     private var isVoiceEnabled = true
+    @Volatile
     private var isSpeaking = false
     private var audioFocusRequest: AudioFocusRequest? = null
     
@@ -90,6 +92,9 @@ class EnhancedAudioManager private constructor(
     
     // Audio Files Cache
     private val audioCache = mutableMapOf<String, File>()
+    
+    // TTS Completion tracking
+    private val ttsCompletions = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
     
     data class AnnouncementData(
         val tokenNumber: Int,
@@ -167,16 +172,12 @@ class EnhancedAudioManager private constructor(
             
             override fun onDone(utteranceId: String) {
                 Log.d(TAG, "TTS Utterance completed: $utteranceId")
-                isSpeaking = false
-                releaseAudioFocus()
-                processNextAnnouncement()
+                ttsCompletions.remove(utteranceId)?.complete(Unit)
             }
             
             override fun onError(utteranceId: String) {
                 Log.e(TAG, "TTS Utterance error: $utteranceId")
-                isSpeaking = false
-                releaseAudioFocus()
-                processNextAnnouncement()
+                ttsCompletions.remove(utteranceId)?.complete(Unit)
             }
         })
     }
@@ -298,13 +299,21 @@ class EnhancedAudioManager private constructor(
                     if (announcement.eventType == "TEST_SOUND" && announcement.customText.isNullOrBlank()) {
                         Log.i(TAG, "🔊 Playing test chime only")
                         playChime(announcement.getScaledVolume() * 100f)
+                        // Reset speaking flag for chime-only sounds
+                        isSpeaking = false
+                        processNextAnnouncement()
                     } else {
                         // Play chime first for announcements that have voice
                         playChime(announcement.getScaledVolume() * 100f)
-                        delay(500) // Brief pause after chime
+                        delay(600) // Brief pause after chime
                         
                         // Generate and speak announcement
                         speakAnnouncement(announcement)
+                        
+                        // Ensure a clear pause before allowing the next announcement to start
+                        delay(1200)
+                        isSpeaking = false
+                        processNextAnnouncement()
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "💥 Error processing announcement", e)
@@ -471,12 +480,10 @@ class EnhancedAudioManager private constructor(
         }
     }
     
-    private fun fallbackToDeviceTts(text: String, lang: String, volume: Int) {
+    private suspend fun fallbackToDeviceTts(text: String, lang: String, volume: Int) = withContext(Dispatchers.Main) {
         if (!ttsInitialized) {
             Log.w(TAG, "TTS not initialized, cannot speak")
-            isSpeaking = false
-            releaseAudioFocus()
-            return
+            return@withContext
         }
         
         val locale = when (lang) {
@@ -487,19 +494,28 @@ class EnhancedAudioManager private constructor(
         
         textToSpeech?.setLanguage(locale)
         
+        val utteranceId = "announcement_${System.currentTimeMillis()}"
         val params = Bundle().apply {
-            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "announcement_${System.currentTimeMillis()}")
-            // Set volume using the scaled volume (0.0 to 1.0)
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
             val scaledVolume = MIN_VOLUME + (volume.coerceIn(0, 100) / 100f) * (MAX_VOLUME - MIN_VOLUME)
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, scaledVolume)
         }
         
-        val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, params.getString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID))
+        val completionJob = CompletableDeferred<Unit>()
+        ttsCompletions[utteranceId] = completionJob
+
+        val result = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
         
         if (result == TextToSpeech.ERROR) {
             Log.e(TAG, "TTS speak failed")
-            isSpeaking = false
-            releaseAudioFocus()
+            ttsCompletions.remove(utteranceId)
+        } else {
+            try {
+                withTimeout(ANNOUNCEMENT_TIMEOUT) { completionJob.await() }
+            } catch (e: Exception) {
+                Log.w(TAG, "TTS timed out")
+                ttsCompletions.remove(utteranceId)
+            }
         }
     }
     
