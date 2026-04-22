@@ -614,9 +614,10 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
      */
     private fun startAudioEventPolling(outletId: String, baseUrl: String) {
         audioPollingJob?.cancel()
+        isPollingActive = false // Reset state before check to avoid race condition
         
-        if (!audioEventsEnabled || isPollingActive) {
-            Log.d("DQMP_POLL", "Audio polling already active or disabled")
+        if (!audioEventsEnabled) {
+            Log.d("DQMP_POLL", "Audio polling disabled")
             return
         }
         
@@ -624,65 +625,70 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
         Log.i("DQMP_POLL", "🎵 PRODUCTION STABLE: Starting HTTP audio polling for outlet: $outletId")
         
         audioPollingJob = viewModelScope.launch {
-            while (isActive && audioEventsEnabled && isPollingActive) {
-                try {
-                    // Adaptive polling: 100ms in burst mode, 300ms normally
-                    val currentTime = System.currentTimeMillis()
-                    val pollInterval = if (currentTime < burstModeUntil) {
-                        100L // SUPER FAST during burst mode (after events)
-                    } else {
-                        300L // Normal fast mode
-                    }
-                    
-                    delay(pollInterval)
-                    
-                    val service = apiService ?: continue
-                    val sinceTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
-                        timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    }.format(java.util.Date(lastAudioEventCheck))
-                    
-                    Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime")
-                    val response = service.getAudioEvents(outletId, sinceTime)
-                    
-                    if (response.isSuccessful) {
-                        val result = response.body()
-                        if (result?.success == true && !result.events.isNullOrEmpty()) {
-                            Log.i("DQMP_POLL", "🔊 FOUND ${result.events.size} AUDIO EVENTS - PROCESSING NOW!")
-                            
-                            // Enable burst mode for next 3 seconds after finding events
-                            burstModeUntil = System.currentTimeMillis() + 3000
-                            Log.i("DQMP_POLL", "⚡ BURST MODE ACTIVATED for 3 seconds - 100ms polling!")
-                            
-                            for (event in result.events) {
-                                Log.i("DQMP_POLL", "🎯 Processing event: ${event.type} | testType: ${event.testType} | lang: ${event.lang}")
-                                processAudioEventReliable(event)
-                            }
-                            
-                            // Acknowledge processed events
-                            val eventIds = result.events.map { it.id }
-                            try {
-                                service.acknowledgeAudioEvents(outletId, mapOf("eventIds" to eventIds))
-                                Log.i("DQMP_POLL", "✅ Events acknowledged: ${eventIds.size}")
-                            } catch (e: Exception) {
-                                Log.w("DQMP_POLL", "Failed to ack events: ${e.message}")
-                            }
+            try {
+                while (isActive && audioEventsEnabled && isPollingActive) {
+                    try {
+                        // Adaptive polling: 100ms in burst mode, 300ms normally
+                        val currentTime = System.currentTimeMillis()
+                        val pollInterval = if (currentTime < burstModeUntil) {
+                            100L // SUPER FAST during burst mode (after events)
                         } else {
-                            Log.d("DQMP_POLL", "No new audio events")
+                            300L // Normal fast mode
                         }
                         
-                        // Update last check time
-                        lastAudioEventCheck = System.currentTimeMillis()
-                    } else {
-                        Log.w("DQMP_POLL", "Audio polling failed: ${response.code()} - ${response.message()}")
+                        delay(pollInterval)
+                        
+                        val service = apiService ?: continue
+                        val sinceTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                            timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        }.format(java.util.Date(lastAudioEventCheck))
+                        
+                        Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime")
+                        val response = service.getAudioEvents(outletId, sinceTime)
+                        
+                        if (response.isSuccessful) {
+                            val result = response.body()
+                            if (result?.success == true && !result.events.isNullOrEmpty()) {
+                                Log.i("DQMP_POLL", "🔊 FOUND ${result.events.size} AUDIO EVENTS - PROCESSING NOW!")
+                                
+                                // Enable burst mode for next 3 seconds after finding events
+                                burstModeUntil = System.currentTimeMillis() + 3000
+                                Log.i("DQMP_POLL", "⚡ BURST MODE ACTIVATED for 3 seconds - 100ms polling!")
+                                
+                                for (event in result.events) {
+                                    Log.i("DQMP_POLL", "🎯 Processing event: ${event.type} | testType: ${event.testType} | lang: ${event.lang}")
+                                    processAudioEventReliable(event)
+                                }
+                                
+                                // Acknowledge processed events
+                                val eventIds = result.events.map { it.id }
+                                try {
+                                    service.acknowledgeAudioEvents(outletId, mapOf("eventIds" to eventIds))
+                                    Log.i("DQMP_POLL", "✅ Events acknowledged: ${eventIds.size}")
+                                } catch (e: Exception) {
+                                    Log.w("DQMP_POLL", "Failed to ack events: ${e.message}")
+                                }
+                            } else {
+                                Log.d("DQMP_POLL", "No new audio events")
+                            }
+                            
+                            // Update last check time
+                            lastAudioEventCheck = System.currentTimeMillis()
+                        } else {
+                            Log.w("DQMP_POLL", "Audio polling failed: ${response.code()} - ${response.message()}")
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        Log.e("DQMP_POLL", "Audio polling loop error: ${e.message}", e)
+                        delay(3000) // Wait longer on error
                     }
-                    
-                } catch (e: Exception) {
-                    Log.e("DQMP_POLL", "Audio polling error: ${e.message}", e)
-                    delay(3000) // Wait longer on error
                 }
+            } catch (e: CancellationException) {
+                Log.i("DQMP_POLL", "Audio polling coroutine cancelled")
+            } finally {
+                Log.i("DQMP_POLL", "🛑 Audio polling loop ended")
+                isPollingActive = false
             }
-            Log.i("DQMP_POLL", "🛑 Audio polling loop ended")
-            isPollingActive = false
         }
     }
     

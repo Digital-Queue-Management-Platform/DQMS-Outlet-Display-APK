@@ -17,6 +17,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import kotlin.coroutines.resume
 
 /**
  * Professional Audio Announcement Manager
@@ -35,6 +40,8 @@ data class AnnouncementRequest(
     val preferredLanguage: String = "en",
     val priority: AnnouncementPriority = AnnouncementPriority.NORMAL,
     val customText: String? = null,
+    val chimeVolume: Float? = null,
+    val voiceVolume: Float? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -92,10 +99,26 @@ class ProfessionalAudioManager(
     private var settings = AnnouncementSettings()
     private var isInitialized = false
     private var processingJob: Job? = null
+    private var activeBaseUrl: String = "https://sltsecmanage.slt.lk:7443/"
+
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
     
     init {
         initializeTTS()
         startQueueProcessor()
+    }
+
+    /**
+     * Update the base URL for backend TTS requests
+     */
+    fun setBaseUrl(url: String) {
+        activeBaseUrl = if (url.endsWith("/")) url else "$url/"
+        Log.d("AUDIO_MGR", "Base URL updated for TTS: $activeBaseUrl")
     }
     
     private fun initializeTTS() {
@@ -174,7 +197,7 @@ class ProfessionalAudioManager(
         }
         
         updateQueueSize()
-        Log.i("AUDIO_MGR", "Announcement queued: ${request.type} for token ${request.tokenNumber}")
+        Log.i("AUDIO_MGR", "Announcement queued: ${request.type} for token ${request.tokenNumber}. Total in queue: ${_queueSize.value}")
     }
     
     /**
@@ -261,6 +284,11 @@ class ProfessionalAudioManager(
             while (isActive) {
                 if (!_isProcessing.value && announcementQueue.isNotEmpty() && isInitialized) {
                     processNextAnnouncement()
+                } else if (!_isProcessing.value && announcementQueue.isEmpty()) {
+                    // Log occasionally to show it's alive
+                    if (System.currentTimeMillis() % 10000 < 100) {
+                        Log.d("AUDIO_MGR", "Queue processor heartbeat - idle")
+                    }
                 }
                 delay(100) // Check queue every 100ms
             }
@@ -274,35 +302,57 @@ class ProfessionalAudioManager(
         _currentAnnouncement.value = announcement
         updateQueueSize()
         
+        Log.i("AUDIO_MGR", "📢 STARTING SEQUENTIAL ANNOUNCEMENT: ${announcement.type} for token ${announcement.tokenNumber}")
+        
         try {
-            // Request audio focus
+            // 1. Request audio focus
             requestAudioFocus()
             
-            // Play tone if enabled
-            if (settings.playTone && announcement.type != AnnouncementType.AUDIO_TEST) {
-                playNotificationTone()
-                delay(1200) // Wait for tone to finish (increased for clarity)
+            // 2. Play tone if enabled, OR if this is specifically an audio test (chime test)
+            if ((settings.playTone || announcement.type == AnnouncementType.AUDIO_TEST) && 
+                announcement.type != AnnouncementType.SYSTEM_MESSAGE) {
+                
+                val chimePlayed = withTimeoutOrNull(5000L) {
+                    playNotificationTone(announcement.chimeVolume)
+                } ?: false
+                if (!chimePlayed) Log.w("AUDIO_MGR", "⚠️ Chime timed out or failed")
+                delay(600L) // Gap between chime and voice
             }
             
-            // Generate and speak announcement text
-            val announcementText = generateAnnouncementText(announcement)
-            speakText(announcementText, announcement.preferredLanguage, announcement.id)
+            // 3. Generate and speak announcement text
+            val phrase = generateAnnouncementText(announcement)
+            val lang = normalizeLanguage(announcement.preferredLanguage)
             
-            // Wait for TTS to finish if we can, or use a safe delay
-            // For simplicity and safety across all Android versions, we use a calculated delay 
-            // based on text length + a healthy 1.2s buffer
-            val estimatedDuration = (announcementText.length * 100L) + 1200L
-            delay(estimatedDuration)
+            if (phrase.isNotBlank()) {
+                Log.d("AUDIO_MGR", "Speaking phrase: $phrase (Lang: $lang)")
+                
+                // Try Backend TTS first for better quality
+                val backendPlayed = withTimeoutOrNull(15000L) {
+                    speakBackend(phrase, lang)
+                } ?: false
+                
+                if (!backendPlayed) {
+                    Log.w("AUDIO_MGR", "⚠️ Backend TTS failed or timed out, falling back to device TTS")
+                    // Fallback to device TTS (asynchronously, but we wait for estimated duration)
+                    speakText(phrase, lang, announcement.id)
+                    val estimatedDuration = (phrase.length * 120L) + 1500L
+                    delay(estimatedDuration)
+                }
+            }
             
-            onAnnouncementComplete()
+            Log.i("AUDIO_MGR", "✅ ANNOUNCEMENT COMPLETED: Token ${announcement.tokenNumber}")
             
         } catch (e: Exception) {
-            Log.e("AUDIO_MGR", "Error processing announcement", e)
-            onAnnouncementComplete()
+            Log.e("AUDIO_MGR", "❌ ERROR in sequential processor: ${e.message}", e)
+        } finally {
+            _isProcessing.value = false
+            _currentAnnouncement.value = null
+            updateQueueSize()
+            releaseAudioFocus()
         }
     }
-    
-    private suspend fun playNotificationTone() {
+
+    private suspend fun playNotificationTone(customVolume: Float? = null): Boolean = suspendCancellableCoroutine { continuation ->
         try {
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
@@ -313,12 +363,125 @@ class ProfessionalAudioManager(
                         .build()
                 )
                 
-                setDataSource(context, Uri.parse("android.resource://${context.packageName}/${R.raw.ding}"))
-                prepare()
-                start()
+                // Use R.raw.announcement as in MainActivity for consistency
+                setDataSource(context, Uri.parse("android.resource://${context.packageName}/${R.raw.announcement}"))
+                
+                // Convert percentage to 0.0-1.0
+                val volume = (customVolume ?: (settings.volume * 100f)) / 100f
+                val clampedVolume = volume.coerceIn(0.0f, 1.0f)
+                Log.d("AUDIO_MGR", "Setting chime volume: $clampedVolume (requested: ${customVolume ?: "default"})")
+                setVolume(clampedVolume, clampedVolume)
+
+                setOnPreparedListener { 
+                    it.start() 
+                    Log.d("AUDIO_MGR", "Chime started")
+                }
+                
+                setOnCompletionListener {
+                    it.release()
+                    mediaPlayer = null
+                    Log.d("AUDIO_MGR", "Chime completed")
+                    if (continuation.isActive) continuation.resume(true)
+                }
+                
+                setOnErrorListener { mp, what, extra ->
+                    Log.e("AUDIO_MGR", "Chime error: $what, $extra")
+                    mp.release()
+                    mediaPlayer = null
+                    if (continuation.isActive) continuation.resume(false)
+                    true
+                }
+                
+                prepareAsync()
+            }
+            
+            continuation.invokeOnCancellation {
+                mediaPlayer?.release()
+                mediaPlayer = null
             }
         } catch (e: Exception) {
-            Log.e("AUDIO_MGR", "Failed to play notification tone", e)
+            Log.e("AUDIO_MGR", "Failed to setup chime", e)
+            if (continuation.isActive) continuation.resume(false)
+        }
+    }
+
+    private suspend fun speakBackend(text: String, lang: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val sanitizedUrl = activeBaseUrl.removeSuffix("/")
+            val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
+            val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
+            val ttsUrl = "$ttsBase/tts/speak?text=$encodedText&lang=$lang&gender=female"
+
+            Log.d("AUDIO_MGR", "Fetching backend TTS: $ttsUrl")
+            
+            val request = Request.Builder().url(ttsUrl).build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext false
+                
+                val audioBytes = response.body?.bytes() ?: return@withContext false
+                val tempFile = File.createTempFile("dqmp_audio_", ".mp3", context.cacheDir)
+                tempFile.writeBytes(audioBytes)
+                
+                val played = withContext(Dispatchers.Main) {
+                    playAudioFile(tempFile)
+                }
+                
+                tempFile.delete()
+                return@withContext played
+            }
+        } catch (e: Exception) {
+            Log.e("AUDIO_MGR", "Backend TTS request failed: ${e.message}")
+            return@withContext false
+        }
+    }
+
+    private suspend fun playAudioFile(file: File): Boolean = suspendCancellableCoroutine { continuation ->
+        try {
+            val mp = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+                setDataSource(file.absolutePath)
+                
+                setOnPreparedListener { 
+                    it.start() 
+                    Log.d("AUDIO_MGR", "Voice playback started")
+                }
+                
+                setOnCompletionListener {
+                    it.release()
+                    Log.d("AUDIO_MGR", "Voice playback completed")
+                    if (continuation.isActive) continuation.resume(true)
+                }
+                
+                setOnErrorListener { player, what, extra ->
+                    Log.e("AUDIO_MGR", "Voice playback error: $what, $extra")
+                    player.release()
+                    if (continuation.isActive) continuation.resume(false)
+                    true
+                }
+                
+                prepareAsync()
+            }
+            
+            continuation.invokeOnCancellation {
+                mp.release()
+            }
+        } catch (e: Exception) {
+            Log.e("AUDIO_MGR", "Failed to play audio file", e)
+            if (continuation.isActive) continuation.resume(false)
+        }
+    }
+
+    private fun normalizeLanguage(raw: String?): String {
+        return when (raw?.trim()?.lowercase()) {
+            "si", "sinhala", "sinhalese" -> "si"
+            "ta", "tamil" -> "ta"
+            "en", "english" -> "en"
+            else -> "en"
         }
     }
     
@@ -327,11 +490,24 @@ class ProfessionalAudioManager(
             AnnouncementType.TOKEN_CALL -> generateTokenCallText(announcement)
             AnnouncementType.TOKEN_RECALL -> generateTokenRecallText(announcement) 
             AnnouncementType.SYSTEM_MESSAGE -> announcement.customText ?: "System message"
-            AnnouncementType.AUDIO_TEST -> announcement.customText ?: "Audio test"
+            AnnouncementType.AUDIO_TEST -> announcement.customText ?: "" // Return empty for chime-only test
             AnnouncementType.COUNTER_OPENING -> generateCounterStatusText(announcement, true)
             AnnouncementType.COUNTER_CLOSING -> generateCounterStatusText(announcement, false)
             AnnouncementType.BREAK_ANNOUNCEMENT -> generateBreakAnnouncementText(announcement)
-            AnnouncementType.CUSTOM_MESSAGE -> announcement.customText ?: ""
+            AnnouncementType.CUSTOM_MESSAGE -> {
+                if (!announcement.customText.isNullOrBlank()) {
+                    announcement.customText
+                } else if (announcement.tokenNumber == "TEST") {
+                    // Fallback for voice test button if no manual text provided
+                    when (announcement.preferredLanguage.lowercase()) {
+                        "si", "sinhala" -> "ශබ්ද විකාශන යන්ත්‍ර පරීක්ෂා කිරීම. එය සාර්ථකව ක්‍රියා කරයි."
+                        "ta", "tamil" -> "ஒலிபெருக்கி சோதனை. இது சரியாக வேலை செய்கிறது."
+                        else -> "Testing the speakers. It is working fine."
+                    }
+                } else {
+                    ""
+                }
+            }
         }
     }
     
@@ -343,16 +519,13 @@ class ProfessionalAudioManager(
         
         return when (lang) {
             "si", "sinhala" -> {
-                val namePrefix = customerName?.let { "$it, " } ?: ""
-                "${namePrefix}ටෝකන් අංක $tokenNum ${if (settings.announceCounterNumber) "කවුන්ටරය $counter වෙත" else ""} කරුණාකර පැමිණෙන්න."
+                "ටෝකන් අංක $tokenNum, කරුණාකර කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
             }
             "ta", "tamil" -> {
-                val namePrefix = customerName?.let { "$it, " } ?: ""
-                "${namePrefix}டோக்கன் எண் $tokenNum ${if (settings.announceCounterNumber) "கவுண்டர் $counter க்கு" else ""} தயவுசெய்து வாருங்கள்."
+                "அடையாள எண் $tokenNum, தயவுசெய்து கவுண்டர் எண் $counter க்கு செல்லவும்."
             }
             else -> {
-                val namePrefix = customerName?.let { "$it, " } ?: ""
-                "${namePrefix}Token number $tokenNum, ${if (settings.announceCounterNumber) "please proceed to counter $counter" else "please proceed to the counter"}."
+                "Token number $tokenNum, please proceed to counter number $counter."
             }
         }
     }
@@ -364,8 +537,8 @@ class ProfessionalAudioManager(
         
         return when (lang) {
             "si", "sinhala" -> "ටෝකන් අංක $tokenNum නැවත කැඳවනු ලැබේ. කරුණාකර වහාම කවුන්ටර අංක $counter වෙත පැමිණෙන්න."
-            "ta", "tamil" -> "டோக்கன் எண் $tokenNum மீண்டும் அழைக்கப்படுகிறது. தயவுசெய்து உடனடியாக கவுண்டர் $counter க்கு வாருங்கள்."
-            else -> "Token number $tokenNum is being recalled. Please proceed to counter $counter immediately."
+            "ta", "tamil" -> "அடையாள எண் $tokenNum மீண்டும் அழைக்கப்படுகிறது. உடனடியாக கவுண்டர் $counter க்கு வரவும்."
+            else -> "Token number $tokenNum is being recalled. Please proceed to counter number $counter immediately."
         }
     }
     

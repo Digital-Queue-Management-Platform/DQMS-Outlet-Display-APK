@@ -28,6 +28,7 @@
         android:theme="@style/Theme.DQMPNativeTV"
         android:banner="@drawable/logo"
         android:hardwareAccelerated="true"
+        android:usesCleartextTraffic="true"
         tools:targetApi="31">
         
         <activity
