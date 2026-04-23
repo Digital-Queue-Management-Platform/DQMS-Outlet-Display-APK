@@ -98,6 +98,7 @@ class ProfessionalAudioManager(
     
     private var settings = AnnouncementSettings()
     private var isInitialized = false
+    private var isTtsReady = false
     private var processingJob: Job? = null
     private var activeBaseUrl: String = "https://sltsecmanage.slt.lk:7443/"
 
@@ -161,12 +162,17 @@ class ProfessionalAudioManager(
                     }
                 })
                 
-                isInitialized = true
-                Log.i("AUDIO_MGR", "Professional Audio Manager initialized successfully")
+                isTtsReady = true
+                Log.i("AUDIO_MGR", "TTS engine initialized successfully")
             }
         } else {
-            Log.e("AUDIO_MGR", "TTS initialization failed")
+            Log.e("AUDIO_MGR", "TTS initialization failed - local voice announcements will be unavailable")
         }
+        
+        // Always set initialized to true so the queue processor can start
+        // This allows chimes and backend TTS to work even if device TTS fails
+        isInitialized = true
+        Log.i("AUDIO_MGR", "Professional Audio Manager ready (Queue Processing: ENABLED)")
     }
     
     /**
@@ -207,14 +213,18 @@ class ProfessionalAudioManager(
         tokenNumber: String,
         counterNumber: Int?,
         customerName: String? = null,
-        language: String = "en"
+        language: String = "en",
+        chimeVolume: Float? = null,
+        voiceVolume: Float? = null
     ) {
         val request = AnnouncementRequest(
             type = AnnouncementType.TOKEN_CALL,
             tokenNumber = tokenNumber,
             counterNumber = counterNumber,
             customerName = customerName,
-            preferredLanguage = language
+            preferredLanguage = language,
+            chimeVolume = chimeVolume,
+            voiceVolume = voiceVolume
         )
         announce(request)
     }
@@ -226,7 +236,9 @@ class ProfessionalAudioManager(
         tokenNumber: String,
         counterNumber: Int?,
         customerName: String? = null,
-        language: String = "en"
+        language: String = "en",
+        chimeVolume: Float? = null,
+        voiceVolume: Float? = null
     ) {
         val request = AnnouncementRequest(
             type = AnnouncementType.TOKEN_RECALL,
@@ -234,7 +246,9 @@ class ProfessionalAudioManager(
             counterNumber = counterNumber,
             customerName = customerName,
             preferredLanguage = language,
-            priority = AnnouncementPriority.HIGH
+            priority = AnnouncementPriority.HIGH,
+            chimeVolume = chimeVolume,
+            voiceVolume = voiceVolume
         )
         announce(request)
     }
@@ -328,7 +342,7 @@ class ProfessionalAudioManager(
                 
                 // Try Backend TTS first for better quality
                 val backendPlayed = withTimeoutOrNull(15000L) {
-                    speakBackend(phrase, lang)
+                    speakBackend(phrase, lang, announcement.voiceVolume ?: 100f)
                 } ?: false
                 
                 if (!backendPlayed) {
@@ -367,10 +381,25 @@ class ProfessionalAudioManager(
                 setDataSource(context, Uri.parse("android.resource://${context.packageName}/${R.raw.announcement}"))
                 
                 // Convert percentage to 0.0-1.0
-                val volume = (customVolume ?: (settings.volume * 100f)) / 100f
+                val volumePercent = customVolume ?: (settings.volume * 100f)
+                val volume = volumePercent / 100f
                 val clampedVolume = volume.coerceIn(0.0f, 1.0f)
-                Log.d("AUDIO_MGR", "Setting chime volume: $clampedVolume (requested: ${customVolume ?: "default"})")
+                
+                Log.d("AUDIO_MGR", "Setting chime volume: $clampedVolume (requested: $volumePercent%)")
                 setVolume(clampedVolume, clampedVolume)
+
+                // If volume is > 100%, use LoudnessEnhancer for amplification
+                if (volumePercent > 100f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    try {
+                        val gainMb = (2000 * kotlin.math.log10(volumePercent / 100.0)).toInt()
+                        val enhancer = android.media.audiofx.LoudnessEnhancer(audioSessionId)
+                        enhancer.setTargetGain(gainMb)
+                        enhancer.enabled = true
+                        Log.d("AUDIO_MGR", "Chime amplified with LoudnessEnhancer: ${gainMb}mB")
+                    } catch (e: Exception) {
+                        Log.w("AUDIO_MGR", "LoudnessEnhancer failed for chime: ${e.message}")
+                    }
+                }
 
                 setOnPreparedListener { 
                     it.start() 
@@ -405,7 +434,7 @@ class ProfessionalAudioManager(
         }
     }
 
-    private suspend fun speakBackend(text: String, lang: String): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun speakBackend(text: String, lang: String, voiceVolume: Float): Boolean = withContext(Dispatchers.IO) {
         try {
             val sanitizedUrl = activeBaseUrl.removeSuffix("/")
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
@@ -423,7 +452,7 @@ class ProfessionalAudioManager(
                 tempFile.writeBytes(audioBytes)
                 
                 val played = withContext(Dispatchers.Main) {
-                    playAudioFile(tempFile)
+                    playAudioFile(tempFile, lang, voiceVolume = voiceVolume)
                 }
                 
                 tempFile.delete()
@@ -435,7 +464,7 @@ class ProfessionalAudioManager(
         }
     }
 
-    private suspend fun playAudioFile(file: File): Boolean = suspendCancellableCoroutine { continuation ->
+    private suspend fun playAudioFile(file: File, lang: String = "en", voiceVolume: Float = 100f): Boolean = suspendCancellableCoroutine { continuation ->
         try {
             val mp = MediaPlayer().apply {
                 setAudioAttributes(
@@ -445,6 +474,30 @@ class ProfessionalAudioManager(
                         .build()
                 )
                 setDataSource(file.absolutePath)
+                
+                // Set base volume to max
+                setVolume(1.0f, 1.0f)
+                
+                // Match web dashboard: 300% max volume + 50% boost for SI/TA
+                var volumeMultiplier = voiceVolume / 100f
+                if (lang == "si" || lang == "ta") {
+                    volumeMultiplier *= 1.5f
+                    Log.d("AUDIO_MGR", "Applying extra 50% boost for $lang language")
+                }
+                
+                // If effective volume is > 100%, use LoudnessEnhancer
+                if (volumeMultiplier > 1.0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    try {
+                        // dB = 20 * log10(multiplier), mB = 100 * dB
+                        val gainMb = (2000 * kotlin.math.log10(volumeMultiplier.toDouble())).toInt()
+                        val enhancer = android.media.audiofx.LoudnessEnhancer(audioSessionId)
+                        enhancer.setTargetGain(gainMb)
+                        enhancer.enabled = true
+                        Log.d("AUDIO_MGR", "Voice amplified with LoudnessEnhancer: ${gainMb}mB (Multiplier: $volumeMultiplier)")
+                    } catch (e: Exception) {
+                        Log.w("AUDIO_MGR", "LoudnessEnhancer failed for voice: ${e.message}")
+                    }
+                }
                 
                 setOnPreparedListener { 
                     it.start() 
@@ -558,6 +611,12 @@ class ProfessionalAudioManager(
     }
     
     private fun speakText(text: String, language: String, utteranceId: String) {
+        if (!isTtsReady) {
+            Log.w("AUDIO_MGR", "TTS not ready, skipping local speech for: $text")
+            scope.launch { onAnnouncementComplete() }
+            return
+        }
+
         tts?.let { textToSpeech ->
             // Set language for this utterance
             setTTSLanguage(textToSpeech, language)

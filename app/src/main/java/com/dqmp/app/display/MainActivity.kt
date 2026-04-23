@@ -205,7 +205,9 @@ class MainActivity : ComponentActivity() {
                                     tokenNumber = event.tokenNumber,
                                     counterNumber = event.counterNumber,
                                     customerName = event.customerName,
-                                    language = event.preferredLanguage ?: "en"
+                                    language = event.preferredLanguage ?: "en",
+                                    chimeVolume = event.chimeVolume?.toFloat(),
+                                    voiceVolume = event.voiceVolume?.toFloat()
                                 )
                             }
                             "TEST_CHIME" -> {
@@ -253,7 +255,9 @@ class MainActivity : ComponentActivity() {
                                     tokenNumber = event.tokenNumber,
                                     counterNumber = event.counterNumber,
                                     customerName = event.customerName,
-                                    language = event.preferredLanguage ?: "en"
+                                    language = event.preferredLanguage ?: "en",
+                                    chimeVolume = event.chimeVolume?.toFloat(),
+                                    voiceVolume = event.voiceVolume?.toFloat()
                                 )
                             }
                         }
