@@ -92,7 +92,7 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
     private var lastDataHash: Int = 0  // For smart caching to avoid unnecessary UI updates
     
     // For audio announcements
-    private val _announcementEvent = MutableSharedFlow<TokenCallEvent>(replay = 0)
+    private val _announcementEvent = MutableSharedFlow<TokenCallEvent>(replay = 0, extraBufferCapacity = 64)
     val announcementEvent = _announcementEvent.asSharedFlow()
     private var lastAnnouncedEventKey: String? = null
     private var lastLiveAudioAnnouncementKey: String? = null

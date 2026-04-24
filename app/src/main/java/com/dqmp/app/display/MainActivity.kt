@@ -295,7 +295,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun speakBackend(baseUrl: String, text: String, lang: String, voiceVolumePercent: Int = 300) {
+    private suspend fun speakBackend(baseUrl: String, text: String, lang: String, voiceVolumePercent: Int = 300) {
         val sanitizedUrl = baseUrl.removeSuffix("/")
         try {
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
@@ -314,8 +314,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun playFetchedTts(ttsUrl: String, voiceVolumePercent: Int, text: String, lang: String) {
-        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+    private suspend fun playFetchedTts(ttsUrl: String, voiceVolumePercent: Int, text: String, lang: String) {
+        var needsFallback = false
+        
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val request = Request.Builder().url(ttsUrl).build()
                 ttsHttpClient.newCall(request).execute().use { response ->
@@ -329,50 +331,110 @@ class MainActivity : ComponentActivity() {
                     val tempFile = File.createTempFile("dqmp_tts_", ".mp3", cacheDir)
                     tempFile.writeBytes(audioBytes)
 
-                    launch(kotlinx.coroutines.Dispatchers.Main) {
-                        try {
-                            val mp = MediaPlayer()
-                            mp.setAudioAttributes(
-                                android.media.AudioAttributes.Builder()
-                                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                    .build()
-                            )
-                            mp.setDataSource(tempFile.absolutePath)
-                            mp.setOnPreparedListener {
-                                val normalized = (voiceVolumePercent.coerceIn(0, 300) / 300f).coerceIn(0f, 1f)
-                                it.setVolume(normalized, normalized)
-                                it.start()
-                                Log.d("DQMP_AUDIO", "Voice announcement started via fetched TTS")
-                            }
-                            mp.setOnCompletionListener {
-                                it.release()
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        suspendCancellableCoroutine<Unit> { continuation ->
+                            try {
+                                val mp = MediaPlayer()
+                                mp.setAudioAttributes(
+                                    android.media.AudioAttributes.Builder()
+                                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                        .build()
+                                )
+                                mp.setDataSource(tempFile.absolutePath)
+                                
+                                var completed = false
+                                fun finish() {
+                                    if (!completed) {
+                                        completed = true
+                                        try {
+                                            mp.release()
+                                        } catch (e: Exception) {}
+                                        tempFile.delete()
+                                        if (continuation.isActive) continuation.resume(Unit)
+                                    }
+                                }
+
+                                mp.setOnPreparedListener {
+                                    val normalized = (voiceVolumePercent.coerceIn(0, 300) / 300f).coerceIn(0f, 1f)
+                                    it.setVolume(normalized, normalized)
+                                    it.start()
+                                    Log.d("DQMP_AUDIO", "Voice announcement started via fetched TTS")
+                                }
+                                mp.setOnCompletionListener {
+                                    Log.d("DQMP_AUDIO", "Voice announcement completed via fetched TTS")
+                                    finish()
+                                }
+                                mp.setOnErrorListener { player, what, extra ->
+                                    Log.e("DQMP_AUDIO", "Fetched TTS playback failed (error: $what, $extra). Falling back to device TTS.")
+                                    needsFallback = true
+                                    finish()
+                                    true
+                                }
+                                
+                                continuation.invokeOnCancellation {
+                                    finish()
+                                }
+                                
+                                mp.prepareAsync()
+                            } catch (playError: Exception) {
+                                Log.e("DQMP_AUDIO", "Fetched TTS setup failed", playError)
+                                needsFallback = true
                                 tempFile.delete()
-                                Log.d("DQMP_AUDIO", "Voice announcement completed via fetched TTS")
+                                if (continuation.isActive) continuation.resume(Unit)
                             }
-                            mp.setOnErrorListener { player, what, extra ->
-                                Log.e("DQMP_AUDIO", "Fetched TTS playback failed (error: $what, $extra). Falling back to device TTS.")
-                                player.release()
-                                tempFile.delete()
-                                configureFallbackTtsLanguage(lang)
-                                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
-                                true
-                            }
-                            mp.prepareAsync()
-                        } catch (playError: Exception) {
-                            Log.e("DQMP_AUDIO", "Fetched TTS setup failed", playError)
-                            tempFile.delete()
-                            configureFallbackTtsLanguage(lang)
-                            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
                         }
                     }
                 }
             } catch (fetchError: Exception) {
                 Log.e("DQMP_AUDIO", "Fetched TTS request failed", fetchError)
-                launch(kotlinx.coroutines.Dispatchers.Main) {
-                    configureFallbackTtsLanguage(lang)
-                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+                needsFallback = true
+            }
+        }
+        
+        if (needsFallback) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                fallbackSpeakWait(text, lang)
+            }
+        }
+    }
+
+    private suspend fun fallbackSpeakWait(text: String, lang: String) {
+        val ttsInstance = tts ?: return
+        
+        suspendCancellableCoroutine<Unit> { continuation ->
+            var completed = false
+            fun finish() {
+                if (!completed) {
+                    completed = true
+                    if (continuation.isActive) continuation.resume(Unit)
                 }
+            }
+
+            configureFallbackTtsLanguage(lang)
+            val utteranceId = java.util.UUID.randomUUID().toString()
+            
+            ttsInstance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) {
+                    if (id == utteranceId) finish()
+                }
+                override fun onError(id: String?) {
+                    if (id == utteranceId) finish()
+                }
+            })
+            
+            val params = Bundle().apply {
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+            }
+            
+            val result = ttsInstance.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            if (result == TextToSpeech.ERROR) {
+                finish()
+            }
+            
+            continuation.invokeOnCancellation {
+                ttsInstance.stop()
             }
         }
     }
