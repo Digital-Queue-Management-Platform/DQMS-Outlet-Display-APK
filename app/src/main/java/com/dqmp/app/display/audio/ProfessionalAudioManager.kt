@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import com.dqmp.app.display.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.withLock
 import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
@@ -22,6 +23,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import kotlin.coroutines.resume
+import android.content.SharedPreferences
+import java.security.MessageDigest
 
 /**
  * Professional Audio Announcement Manager
@@ -102,6 +105,19 @@ class ProfessionalAudioManager(
     private var processingJob: Job? = null
     private var activeBaseUrl: String = "https://sltsecmanage.slt.lk:7443/"
 
+    // Parallel announcement processing with limited concurrency
+    private val announcementProcessingScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var activeProcessingJobs = mutableMapOf<String, Job>()
+    private val MAX_PARALLEL_ANNOUNCEMENTS = 3 // Allow more parallel fetches
+    
+    // Mutex to ensure announcements play one after another (no mixing/chaos)
+    private val playbackMutex = kotlinx.coroutines.sync.Mutex()
+    
+    // TTS Response Cache - reduces latency for common phrases
+    private val ttsCache = mutableMapOf<String, File>()
+    private val CACHE_DIR by lazy { File(context.cacheDir, "tts_cache").apply { mkdirs() } }
+    private val CACHE_EXPIRY_DAYS = 7
+
     private val httpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -112,6 +128,28 @@ class ProfessionalAudioManager(
     init {
         initializeTTS()
         startQueueProcessor()
+        preCacheCommonPhrases()
+    }
+
+    private fun preCacheCommonPhrases() {
+        announcementProcessingScope.launch {
+            val langs = listOf("en", "si", "ta")
+            // Static phrases often used
+            val phrases = listOf(
+                "Token", "Counter", "Thank you", "Please proceed to",
+                "This is a speaker test announcement.",
+                "මෙය ස්පීකර් පරීක්ෂණ නිවේදනයකි.",
+                "இது ஒரு ஒலிபெருக்கி சோதனை அறிவிப்பு."
+            )
+            for (lang in langs) {
+                for (phrase in phrases) {
+                    // Pre-fetching these ensures "Speaker & Voice Testing" is instant
+                    speakBackend(phrase, lang, 100f)
+                    delay(300) // Don't overwhelm the backend
+                }
+            }
+            Log.i("AUDIO_MGR", "✓ Pre-cached common phrases and test messages")
+        }
     }
 
     /**
@@ -296,70 +334,89 @@ class ProfessionalAudioManager(
     private fun startQueueProcessor() {
         processingJob = scope.launch {
             while (isActive) {
-                if (!_isProcessing.value && announcementQueue.isNotEmpty() && isInitialized) {
-                    processNextAnnouncement()
-                } else if (!_isProcessing.value && announcementQueue.isEmpty()) {
+                if (announcementQueue.isNotEmpty() && isInitialized) {
+                    // Non-blocking launch - check if we can process more in parallel
+                    while (announcementQueue.isNotEmpty() && activeProcessingJobs.size < MAX_PARALLEL_ANNOUNCEMENTS) {
+                        val announcement = announcementQueue.poll()
+                        if (announcement != null) {
+                            // Launch each announcement as independent parallel job
+                            val job = announcementProcessingScope.launch {
+                                processAnnouncementParallel(announcement)
+                            }
+                            activeProcessingJobs[announcement.id] = job
+                        }
+                    }
+                } else if (announcementQueue.isEmpty()) {
                     // Log occasionally to show it's alive
                     if (System.currentTimeMillis() % 10000 < 100) {
-                        Log.d("AUDIO_MGR", "Queue processor heartbeat - idle")
+                        Log.d("AUDIO_MGR", "Queue processor heartbeat - idle (Active jobs: ${activeProcessingJobs.size})")
                     }
                 }
-                delay(100) // Check queue every 100ms
+                delay(50) // Check queue every 50ms for faster response
             }
         }
     }
     
-    private suspend fun processNextAnnouncement() {
-        val announcement = announcementQueue.poll() ?: return
-        
-        _isProcessing.value = true
+    private suspend fun processAnnouncementParallel(announcement: AnnouncementRequest) {
         _currentAnnouncement.value = announcement
         updateQueueSize()
         
-        Log.i("AUDIO_MGR", "📢 STARTING SEQUENTIAL ANNOUNCEMENT: ${announcement.type} for token ${announcement.tokenNumber}")
+        Log.i("AUDIO_MGR", "📢 STARTING PARALLEL ANNOUNCEMENT [${activeProcessingJobs.size}/${MAX_PARALLEL_ANNOUNCEMENTS}]: ${announcement.type} for token ${announcement.tokenNumber}")
         
         try {
-            // 1. Request audio focus
-            requestAudioFocus()
-            
-            // 2. Play tone if enabled, OR if this is specifically an audio test (chime test)
-            if ((settings.playTone || announcement.type == AnnouncementType.AUDIO_TEST) && 
-                announcement.type != AnnouncementType.SYSTEM_MESSAGE) {
-                
-                val chimePlayed = withTimeoutOrNull(5000L) {
-                    playNotificationTone(announcement.chimeVolume)
-                } ?: false
-                if (!chimePlayed) Log.w("AUDIO_MGR", "⚠️ Chime timed out or failed")
-                delay(600L) // Gap between chime and voice
-            }
-            
-            // 3. Generate and speak announcement text
+            // 1. PREPARATION PHASE (Parallel - No lock)
+            // Generate text and ensure it's ready/cached before we wait for the speaker
             val phrase = generateAnnouncementText(announcement)
             val lang = normalizeLanguage(announcement.preferredLanguage)
             
-            if (phrase.isNotBlank()) {
-                Log.d("AUDIO_MGR", "Speaking phrase: $phrase (Lang: $lang)")
+            if (phrase.isBlank()) {
+                activeProcessingJobs.remove(announcement.id)
+                return
+            }
+
+            // 2. PLAYBACK PHASE (Sequential - Requires lock)
+            // This ensures job 2 waits for job 1 to finish speaking before starting its chime
+            playbackMutex.withLock {
+                Log.d("AUDIO_MGR", "🎙️ Mutex acquired for Token ${announcement.tokenNumber}")
+                requestAudioFocus()
                 
-                // Try Backend TTS first for better quality
-                val backendPlayed = withTimeoutOrNull(15000L) {
-                    speakBackend(phrase, lang, announcement.voiceVolume ?: 100f)
-                } ?: false
-                
-                if (!backendPlayed) {
-                    Log.w("AUDIO_MGR", "⚠️ Backend TTS failed or timed out, falling back to device TTS")
-                    // Fallback to device TTS (asynchronously, but we wait for estimated duration)
-                    speakText(phrase, lang, announcement.id)
-                    val estimatedDuration = (phrase.length * 120L) + 1500L
-                    delay(estimatedDuration)
+                try {
+                    // Play tone if enabled
+                    if ((settings.playTone || announcement.type == AnnouncementType.AUDIO_TEST) && 
+                        announcement.type != AnnouncementType.SYSTEM_MESSAGE) {
+                        
+                        withTimeoutOrNull(3000L) {
+                            playNotificationTone(announcement.chimeVolume)
+                        }
+                        delay(500L) // Gap between chime and voice
+                    }
+                    
+                    // Speak announcement text (uses cache if available)
+                    Log.d("AUDIO_MGR", "Speaking phrase: $phrase (Lang: $lang)")
+                    
+                    val backendPlayed = withTimeoutOrNull(10000L) {
+                        speakBackend(phrase, lang, announcement.voiceVolume ?: 100f)
+                    } ?: false
+                    
+                    if (!backendPlayed) {
+                        Log.w("AUDIO_MGR", "⚠️ Fallback to local TTS")
+                        speakText(phrase, lang, announcement.id)
+                        val estimatedDuration = (phrase.length * 100L) + 1000L
+                        delay(estimatedDuration)
+                    }
+                } finally {
+                    releaseAudioFocus()
+                    Log.d("AUDIO_MGR", "🏁 Mutex released for Token ${announcement.tokenNumber}")
                 }
             }
             
             Log.i("AUDIO_MGR", "✅ ANNOUNCEMENT COMPLETED: Token ${announcement.tokenNumber}")
             
         } catch (e: Exception) {
-            Log.e("AUDIO_MGR", "❌ ERROR in sequential processor: ${e.message}", e)
+            Log.e("AUDIO_MGR", "❌ ERROR in parallel processor: ${e.message}")
         } finally {
-            _isProcessing.value = false
+            // Remove job from active pool
+            activeProcessingJobs.remove(announcement.id)
             _currentAnnouncement.value = null
             updateQueueSize()
             releaseAudioFocus()
@@ -436,6 +493,28 @@ class ProfessionalAudioManager(
 
     private suspend fun speakBackend(text: String, lang: String, voiceVolume: Float): Boolean = withContext(Dispatchers.IO) {
         try {
+            // Generate cache key from text + language
+            val cacheKey = md5Hash("$text|$lang")
+            
+            // Check if cached file exists and is fresh
+            val cachedFile = File(CACHE_DIR, "$cacheKey.mp3")
+            if (cachedFile.exists()) {
+                val fileAge = System.currentTimeMillis() - cachedFile.lastModified()
+                val fileAgeInDays = fileAge / (1000 * 60 * 60 * 24)
+                
+                if (fileAgeInDays < CACHE_EXPIRY_DAYS) {
+                    Log.d("AUDIO_MGR", "✓ Using cached TTS for: $text (Age: $fileAgeInDays days)")
+                    return@withContext withContext(Dispatchers.Main) {
+                        playAudioFile(cachedFile, lang, voiceVolume = voiceVolume)
+                    }
+                } else {
+                    // Cache expired, delete it
+                    cachedFile.delete()
+                    Log.d("AUDIO_MGR", "Cache expired, refreshing: $text")
+                }
+            }
+            
+            // Not in cache - fetch from backend
             val sanitizedUrl = activeBaseUrl.removeSuffix("/")
             val encodedText = java.net.URLEncoder.encode(text, "UTF-8")
             val ttsBase = if (sanitizedUrl.endsWith("/api")) sanitizedUrl else "$sanitizedUrl/api"
@@ -448,6 +527,16 @@ class ProfessionalAudioManager(
                 if (!response.isSuccessful) return@withContext false
                 
                 val audioBytes = response.body?.bytes() ?: return@withContext false
+                
+                // Save to cache
+                try {
+                    cachedFile.writeBytes(audioBytes)
+                    Log.d("AUDIO_MGR", "✓ Cached TTS response: $text")
+                } catch (e: Exception) {
+                    Log.w("AUDIO_MGR", "Failed to cache TTS: ${e.message}")
+                }
+                
+                // Create temp file for playback
                 val tempFile = File.createTempFile("dqmp_audio_", ".mp3", context.cacheDir)
                 tempFile.writeBytes(audioBytes)
                 
@@ -462,6 +551,11 @@ class ProfessionalAudioManager(
             Log.e("AUDIO_MGR", "Backend TTS request failed: ${e.message}")
             return@withContext false
         }
+    }
+    
+    private fun md5Hash(input: String): String {
+        val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     private suspend fun playAudioFile(file: File, lang: String = "en", voiceVolume: Float = 100f): Boolean = suspendCancellableCoroutine { continuation ->
@@ -526,6 +620,33 @@ class ProfessionalAudioManager(
         } catch (e: Exception) {
             Log.e("AUDIO_MGR", "Failed to play audio file", e)
             if (continuation.isActive) continuation.resume(false)
+        }
+    }
+
+    /**
+     * Pre-cache upcoming announcements from the waiting queue
+     * This eliminates the 3-8s delay when the token is actually called
+     */
+    fun preCacheAnnouncements(tokens: List<com.dqmp.app.display.data.Token>) {
+        if (tokens.isEmpty()) return
+        
+        announcementProcessingScope.launch {
+            // Pre-cache top 5 tokens in the queue
+            tokens.take(5).forEach { token ->
+                val lang = normalizeLanguage(token.customer?.preferredLanguage)
+                val phrase = generateTokenCallText(AnnouncementRequest(
+                    type = AnnouncementType.TOKEN_CALL,
+                    tokenNumber = token.tokenNumber.toString(),
+                    counterNumber = 1, // Placeholder counter
+                    preferredLanguage = lang
+                ))
+                
+                if (phrase.isNotBlank()) {
+                    Log.d("AUDIO_MGR", "Pre-caching TTS for token #${token.tokenNumber}")
+                    speakBackend(phrase, lang, 100f)
+                    delay(200) // Small gap
+                }
+            }
         }
     }
 
@@ -733,7 +854,12 @@ class ProfessionalAudioManager(
     fun stopCurrent() {
         tts?.stop()
         mediaPlayer?.stop()
-        onAnnouncementComplete()
+        // Cancel all active processing jobs
+        activeProcessingJobs.values.forEach { it.cancel() }
+        activeProcessingJobs.clear()
+        _currentAnnouncement.value = null
+        updateQueueSize()
+        releaseAudioFocus()
     }
     
     /**
@@ -741,6 +867,10 @@ class ProfessionalAudioManager(
      */
     fun shutdown() {
         processingJob?.cancel()
+        // Cancel all active jobs and cleanup scope
+        activeProcessingJobs.values.forEach { it.cancel() }
+        activeProcessingJobs.clear()
+        announcementProcessingScope.cancel()
         tts?.shutdown()
         mediaPlayer?.release()
         clearQueue()

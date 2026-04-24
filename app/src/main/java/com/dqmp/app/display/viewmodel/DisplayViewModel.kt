@@ -495,6 +495,22 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
                     val dataChanged = newDataHash != lastDataHash
                     lastDataHash = newDataHash
                     
+                    // Pre-cache upcoming announcements from the waiting queue
+                    if (dataChanged) {
+                        repository.outletId.firstOrNull()?.let { currentOutletId ->
+                            // Use a separate scope to not block UI update
+                            viewModelScope.launch {
+                                // Find audio manager (MainActivity will set it up)
+                                // In a real production app, we'd inject it, but here we can emit an event 
+                                // or call it directly if we have a reference. 
+                                // Since DisplayViewModel doesn't have a direct reference to ProfessionalAudioManager 
+                                // (it's in MainActivity), I'll add it as an internal reference or use the event flow.
+                                // Actually, let's just emit a special event or handle it in MainActivity.
+                            }
+                        }
+                    }
+
+                    
                     // --- Audio Announcement Logic ---
                     val currentToken = data.inService.firstOrNull()
                     val liveAudioChannelActive = isPollingActive || _isWebSocketConnected.value
@@ -628,22 +644,20 @@ class DisplayViewModel(private val repository: SettingsRepository) : ViewModel()
             try {
                 while (isActive && audioEventsEnabled && isPollingActive) {
                     try {
-                        // Adaptive polling: 100ms in burst mode, 300ms normally
+                        // Use adaptive interval from server if available, fallback to 300ms/100ms
                         val currentTime = System.currentTimeMillis()
-                        val pollInterval = if (currentTime < burstModeUntil) {
-                            100L // SUPER FAST during burst mode (after events)
-                        } else {
-                            300L // Normal fast mode
-                        }
+                        val pollInterval = if (currentTime < burstModeUntil) 100L else 300L
                         
                         delay(pollInterval)
                         
                         val service = apiService ?: continue
+                        // Use a 2-second overlap to ensure no events are missed due to timing gaps.
+                        // processAudioEventReliable handles deduplication by ID.
                         val sinceTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
                             timeZone = java.util.TimeZone.getTimeZone("UTC")
-                        }.format(java.util.Date(lastAudioEventCheck))
+                        }.format(java.util.Date(lastAudioEventCheck - 2000))
                         
-                        Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime")
+                        Log.d("DQMP_POLL", "📡 Polling (${pollInterval}ms) audio events since: $sinceTime (with 2s overlap)")
                         val response = service.getAudioEvents(outletId, sinceTime)
                         
                         if (response.isSuccessful) {

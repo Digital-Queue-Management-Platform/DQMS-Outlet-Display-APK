@@ -12,8 +12,8 @@ android {
         applicationId = "com.dqmp.app.display"
         minSdk = 24 // Android 7.0+, well within Android 9+ requirement
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -49,7 +49,7 @@ android {
     applicationVariants.all {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "DQMP_Outlet_Display_V1.0.apk"
+            output.outputFileName = "DQMP_Outlet_Display_V1.1.apk"
         }
     }
 }

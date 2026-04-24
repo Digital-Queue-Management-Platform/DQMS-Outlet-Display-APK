@@ -44,6 +44,15 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
+import android.content.Intent
+import androidx.core.content.FileProvider
+import org.json.JSONObject
+import okhttp3.Callback
+import okhttp3.Call
+import okhttp3.Response
+import java.io.IOException
+import java.io.FileOutputStream
+import android.os.Environment
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
@@ -102,6 +111,14 @@ class MainActivity : ComponentActivity() {
         val maxVolume = audioMgr.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
         audioMgr.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, maxVolume, 0)
         Log.d("DQMP_AUDIO", "📢 Media volume set to maximum: $maxVolume")
+
+        // --- Auto-Update Check ---
+        lifecycleScope.launch {
+            val config = configurationManager?.getConfiguration()
+            if (config != null) {
+                checkForUpdates(config.baseUrl)
+            }
+        }
         
         // --- Enhanced Immersive Mode & Kiosk Setup ---
         setupKioskMode(kioskMode)
@@ -186,6 +203,14 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(state) {
                     if (state is DisplayState.Setup) {
                         Log.d("DQMP_APP", "Application is in SETUP state - waiting for user input.")
+                    }
+                    
+                    // Pre-cache upcoming announcements when waiting list changes
+                    if (state is DisplayState.Success) {
+                        val successState = state as DisplayState.Success
+                        if (successState.data.waiting.isNotEmpty()) {
+                            audioManager?.preCacheAnnouncements(successState.data.waiting)
+                        }
                     }
                 }
                 
@@ -402,5 +427,99 @@ class MainActivity : ComponentActivity() {
         }
         
         return super.onKeyUp(keyCode, event)
+    }
+
+    private fun checkForUpdates(baseUrl: String) {
+        val currentVersion = try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            pInfo.versionName
+        } catch (e: Exception) {
+            "1.0.0"
+        }
+
+        val sanitizedBaseUrl = baseUrl.removeSuffix("/")
+        val updateUrl = "$sanitizedBaseUrl/api/app/check-update?version=$currentVersion"
+        
+        Log.i("APP_UPDATE", "Checking for updates at: $updateUrl (Current: $currentVersion)")
+        
+        val client = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+            
+        val request = Request.Builder().url(updateUrl).build()
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val body = it.body?.string() ?: return
+                    val json = JSONObject(body)
+                    
+                    if (json.optBoolean("hasUpdate", false)) {
+                        val latestVersion = json.getString("latestVersion")
+                        val downloadUrl = json.getString("downloadUrl")
+                        Log.i("APP_UPDATE", "🚀 New version available: $latestVersion. Downloading from $downloadUrl")
+                        downloadApk(downloadUrl)
+                    } else {
+                        Log.i("APP_UPDATE", "✓ App is up to date ($currentVersion)")
+                    }
+                }
+            }
+            
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("APP_UPDATE", "Failed to check for updates: ${e.message}")
+            }
+        })
+    }
+
+    private fun downloadApk(url: String) {
+        val client = OkHttpClient()
+        val request = Request.Builder().url(url).build()
+        
+        client.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val body = it.body ?: return
+                    
+                    try {
+                        val apkFile = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "update.apk")
+                        val fos = FileOutputStream(apkFile)
+                        fos.write(body.bytes())
+                        fos.close()
+                        
+                        Log.i("APP_UPDATE", "✓ APK downloaded to: ${apkFile.absolutePath}")
+                        installApk(apkFile)
+                    } catch (e: Exception) {
+                        Log.e("APP_UPDATE", "Failed to save APK: ${e.message}")
+                    }
+                }
+            }
+
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("APP_UPDATE", "Failed to download APK: ${e.message}")
+            }
+        })
+    }
+
+    private fun installApk(file: File) {
+        try {
+            val contentUri = FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                file
+            )
+            
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            
+            Log.i("APP_UPDATE", "📦 Triggering installation for: $packageName")
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("APP_UPDATE", "Failed to trigger installation: ${e.message}")
+        }
     }
 }
